@@ -1,0 +1,342 @@
+from flask import Flask, request, jsonify
+from flask_restx import Api, Resource, fields
+import pulp
+import numpy as np
+from typing import Dict, List, Optional
+from dataclasses import dataclass
+import json
+
+app = Flask(__name__)
+api = Api(app, version='1.0', title='EV Charging MILP API', 
+          description='Mixed Integer Linear Programming model for EV charging optimization')
+
+# Namespace for the API
+ns = api.namespace('optimize', description='EV Charging Optimization Operations')
+
+# Input models for API documentation
+battery_config_model = api.model('BatteryConfig', {
+    'type': fields.String(required=True, description='Battery type (pv, eauto)', enum=['pv', 'eauto']),
+    's_min': fields.Float(required=True, description='Minimum state of charge (Wh)'),
+    's_max': fields.Float(required=True, description='Maximum state of charge (Wh)'),
+    's_initial': fields.Float(required=True, description='Initial state of charge (Wh)'),
+    'k_max': fields.Float(required=True, description='Maximum charge/discharge power (W)'),
+    'p_a': fields.Float(required=True, description='Value per Wh at end of horizon')
+})
+
+time_series_model = api.model('TimeSeries', {
+    'gt': fields.List(fields.Float, required=True, description='Required total energy at each time step (Wh)'),
+    'ft': fields.List(fields.Float, required=True, description='Forecasted energy production at each time step (Wh)'),
+    'p_N': fields.List(fields.Float, required=True, description='Price per Wh taken from grid at each time step'),
+    'p_E': fields.List(fields.Float, required=True, description='Price per Wh fed into grid at each time step')
+})
+
+optimization_input_model = api.model('OptimizationInput', {
+    'batteries': fields.List(fields.Nested(battery_config_model), required=True, description='Battery configurations'),
+    'time_series': fields.Nested(time_series_model, required=True, description='Time series data'),
+    'eta_c': fields.Float(required=False, default=0.95, description='Charging efficiency'),
+    'eta_d': fields.Float(required=False, default=0.95, description='Discharging efficiency'),
+    'M': fields.Float(required=False, default=1e6, description='Big M parameter for constraints')
+})
+
+# Output models
+battery_result_model = api.model('BatteryResult', {
+    'type': fields.String(description='Battery type'),
+    'charging_power': fields.List(fields.Float, description='Charging power at each time step (W)'),
+    'discharging_power': fields.List(fields.Float, description='Discharging power at each time step (W)'),
+    'state_of_charge': fields.List(fields.Float, description='State of charge at each time step (Wh)')
+})
+
+optimization_result_model = api.model('OptimizationResult', {
+    'status': fields.String(description='Optimization status'),
+    'objective_value': fields.Float(description='Optimal objective function value'),
+    'batteries': fields.List(fields.Nested(battery_result_model), description='Battery optimization results'),
+    'grid_import': fields.List(fields.Float, description='Energy imported from grid at each time step (Wh)'),
+    'grid_export': fields.List(fields.Float, description='Energy exported to grid at each time step (Wh)'),
+    'flow_direction': fields.List(fields.Integer, description='Binary flow direction (1=export, 0=import)')
+})
+
+@dataclass
+class BatteryConfig:
+    type: str
+    s_min: float
+    s_max: float
+    s_initial: float
+    k_max: float
+    p_a: float
+
+@dataclass
+class TimeSeriesData:
+    gt: List[float]  # Required total energy
+    ft: List[float]  # Forecasted production
+    p_N: List[float]  # Import prices
+    p_E: List[float]  # Export prices
+
+class EVChargingOptimizer:
+    def __init__(self, batteries: List[BatteryConfig], time_series: TimeSeriesData, 
+                 eta_c: float = 0.95, eta_d: float = 0.95, M: float = 1e6):
+        self.batteries = batteries
+        self.time_series = time_series
+        self.eta_c = eta_c
+        self.eta_d = eta_d
+        self.M = M
+        self.T = len(time_series.gt)
+        self.problem = None
+        self.variables = {}
+        
+    def create_model(self):
+        """Create the MILP model based on the EOS formulation"""
+        # Create problem
+        self.problem = pulp.LpProblem("EV_Charging_Optimization", pulp.LpMaximize)
+        
+        # Time steps
+        time_steps = range(self.T)
+        battery_types = [bat.type for bat in self.batteries]
+        
+        # Decision variables
+        # Charging power variables
+        self.variables['c'] = {}
+        for i, bat in enumerate(self.batteries):
+            self.variables['c'][bat.type] = [
+                pulp.LpVariable(f"c_{bat.type}_{t}", lowBound=0, upBound=bat.k_max)
+                for t in time_steps
+            ]
+        
+        # Discharging power variables
+        self.variables['d'] = {}
+        for i, bat in enumerate(self.batteries):
+            self.variables['d'][bat.type] = [
+                pulp.LpVariable(f"d_{bat.type}_{t}", lowBound=0, upBound=bat.k_max)
+                for t in time_steps
+            ]
+        
+        # State of charge variables
+        self.variables['s'] = {}
+        for i, bat in enumerate(self.batteries):
+            self.variables['s'][bat.type] = [
+                pulp.LpVariable(f"s_{bat.type}_{t}", lowBound=bat.s_min, upBound=bat.s_max)
+                for t in time_steps
+            ]
+        
+        # Grid import/export variables
+        self.variables['n'] = [pulp.LpVariable(f"n_{t}", lowBound=0) for t in time_steps]
+        self.variables['e'] = [pulp.LpVariable(f"e_{t}", lowBound=0) for t in time_steps]
+        
+        # Binary flow direction variables (only when p_N <= p_E)
+        self.variables['y'] = []
+        for t in time_steps:
+            if self.time_series.p_N[t] <= self.time_series.p_E[t]:
+                self.variables['y'].append(pulp.LpVariable(f"y_{t}", cat='Binary'))
+            else:
+                self.variables['y'].append(None)
+        
+        # Objective function (1): Maximize economic benefit
+        objective = 0
+        
+        # Grid import cost (negative because we want to minimize cost)
+        for t in time_steps:
+            objective -= self.variables['n'][t] * self.time_series.p_N[t]
+        
+        # Grid export revenue
+        for t in time_steps:
+            objective += self.variables['e'][t] * self.time_series.p_E[t]
+        
+        # Final state of charge value
+        for bat in self.batteries:
+            objective += self.variables['s'][bat.type][-1] * bat.p_a
+        
+        self.problem += objective
+        
+        # Constraints
+        self._add_constraints()
+        
+    def _add_constraints(self):
+        """Add all constraints to the model"""
+        time_steps = range(self.T)
+        
+        # Constraint (2): Power balance
+        for t in time_steps:
+            battery_net_power = 0
+            for bat in self.batteries:
+                battery_net_power += (self.variables['c'][bat.type][t] - 
+                                    self.variables['d'][bat.type][t])
+            
+            self.problem += (battery_net_power + self.time_series.ft[t] + 
+                           self.variables['n'][t] == 
+                           self.variables['e'][t] + self.time_series.gt[t])
+        
+        # Constraint (3): Battery dynamics
+        for bat in self.batteries:
+            # Initial state of charge
+            if len(time_steps) > 0:
+                self.problem += (self.variables['s'][bat.type][0] == 
+                               bat.s_initial + self.eta_c * self.variables['c'][bat.type][0] -
+                               (1/self.eta_d) * self.variables['d'][bat.type][0])
+            
+            # State of charge evolution
+            for t in range(1, self.T):
+                self.problem += (self.variables['s'][bat.type][t] == 
+                               self.variables['s'][bat.type][t-1] + 
+                               self.eta_c * self.variables['c'][bat.type][t] -
+                               (1/self.eta_d) * self.variables['d'][bat.type][t])
+        
+        # Constraints (4)-(5): Grid flow direction (only when p_N <= p_E)
+        for t in time_steps:
+            if self.variables['y'][t] is not None:  # Only when p_N <= p_E
+                # Export constraint
+                self.problem += self.variables['e'][t] <= self.M * self.variables['y'][t]
+                # Import constraint
+                self.problem += self.variables['n'][t] <= self.M * (1 - self.variables['y'][t])
+    
+    def solve(self) -> Dict:
+        """Solve the optimization problem and return results"""
+        if self.problem is None:
+            self.create_model()
+        
+        # Solve the problem
+        solver = pulp.PULP_CBC_CMD(msg=0)  # Silent solver
+        self.problem.solve(solver)
+        
+        # Extract results
+        status = pulp.LpStatus[self.problem.status]
+        
+        if status == 'Optimal':
+            result = {
+                'status': status,
+                'objective_value': pulp.value(self.problem.objective),
+                'batteries': [],
+                'grid_import': [pulp.value(var) for var in self.variables['n']],
+                'grid_export': [pulp.value(var) for var in self.variables['e']],
+                'flow_direction': []
+            }
+            
+            # Extract battery results
+            for bat in self.batteries:
+                battery_result = {
+                    'type': bat.type,
+                    'charging_power': [pulp.value(var) for var in self.variables['c'][bat.type]],
+                    'discharging_power': [pulp.value(var) for var in self.variables['d'][bat.type]],
+                    'state_of_charge': [pulp.value(var) for var in self.variables['s'][bat.type]]
+                }
+                result['batteries'].append(battery_result)
+            
+            # Extract flow direction
+            for y_var in self.variables['y']:
+                if y_var is not None:
+                    result['flow_direction'].append(int(pulp.value(y_var)))
+                else:
+                    result['flow_direction'].append(0)  # Default to import when constraint not active
+            
+            return result
+        else:
+            return {
+                'status': status,
+                'objective_value': None,
+                'batteries': [],
+                'grid_import': [],
+                'grid_export': [],
+                'flow_direction': []
+            }
+
+@ns.route('/charge-schedule')
+class OptimizeCharging(Resource):
+    @api.expect(optimization_input_model)
+    @api.marshal_with(optimization_result_model)
+    def post(self):
+        """
+        Optimize EV charging schedule using MILP
+        
+        This endpoint solves a Mixed Integer Linear Programming problem to optimize
+        EV charging schedules considering battery constraints, grid prices, and energy demands.
+        """
+        try:
+            data = request.get_json()
+            
+            # Validate input data
+            if not data:
+                api.abort(400, "No input data provided")
+            
+            # Parse battery configurations
+            batteries = []
+            for bat_data in data['batteries']:
+                batteries.append(BatteryConfig(
+                    type=bat_data['type'],
+                    s_min=bat_data['s_min'],
+                    s_max=bat_data['s_max'],
+                    s_initial=bat_data['s_initial'],
+                    k_max=bat_data['k_max'],
+                    p_a=bat_data['p_a']
+                ))
+            
+            # Parse time series data
+            time_series = TimeSeriesData(
+                gt=data['time_series']['gt'],
+                ft=data['time_series']['ft'],
+                p_N=data['time_series']['p_N'],
+                p_E=data['time_series']['p_E']
+            )
+            
+            # Validate time series lengths
+            lengths = [len(time_series.gt), len(time_series.ft), 
+                      len(time_series.p_N), len(time_series.p_E)]
+            if len(set(lengths)) > 1:
+                api.abort(400, "All time series must have the same length")
+            
+            # Create and solve optimizer
+            optimizer = EVChargingOptimizer(
+                batteries=batteries,
+                time_series=time_series,
+                eta_c=data.get('eta_c', 0.95),
+                eta_d=data.get('eta_d', 0.95),
+                M=data.get('M', 1e6)
+            )
+            
+            result = optimizer.solve()
+            return result
+            
+        except Exception as e:
+            api.abort(500, f"Optimization failed: {str(e)}")
+
+@ns.route('/health')
+class Health(Resource):
+    def get(self):
+        """Health check endpoint"""
+        return {'status': 'healthy', 'message': 'EV Charging MILP API is running'}
+
+# Example data endpoint for testing
+@ns.route('/example')
+class ExampleData(Resource):
+    def get(self):
+        """Get example input data for testing the optimization"""
+        example_data = {
+            "batteries": [
+                {
+                    "type": "eauto",
+                    "s_min": 5000,
+                    "s_max": 50000,
+                    "s_initial": 15000,
+                    "k_max": 7000,
+                    "p_a": 0.25
+                },
+                {
+                    "type": "pv",
+                    "s_min": 1000,
+                    "s_max": 20000,
+                    "s_initial": 5000,
+                    "k_max": 5000,
+                    "p_a": 0.20
+                }
+            ],
+            "time_series": {
+                "gt": [3000, 4000, 5000, 4500, 3500, 3000],  # Required energy
+                "ft": [2000, 6000, 8000, 7000, 4000, 1000],  # PV production
+                "p_N": [0.30, 0.25, 0.20, 0.22, 0.28, 0.32],  # Import prices
+                "p_E": [0.15, 0.12, 0.10, 0.11, 0.14, 0.16]   # Export prices
+            },
+            "eta_c": 0.95,
+            "eta_d": 0.95,
+            "M": 1000000
+        }
+        return example_data
+
+if __name__ == '__main__':
+    app.run(debug=True, host='0.0.0.0', port=7050)

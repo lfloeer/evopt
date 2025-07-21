@@ -1,0 +1,77 @@
+# fly.toml app configuration file generated for ev-charging-milp
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+
+app = "ev-charging-milp"
+primary_region = "fra"   # Frankfurt region
+
+[build]
+
+[deploy]
+strategy = "rolling"
+
+[env]
+PORT = "8080"
+FLASK_ENV = "production"
+PYTHONUNBUFFERED = "1"
+
+[experimental]
+auto_rollback = true
+
+[[services]]
+protocol = "tcp"
+internal_port = 8080
+processes = ["app"]
+
+[[services.ports]]
+port = 80
+handlers = ["http"]
+force_https = true
+
+[[services.ports]]
+port = 443
+handlers = ["http", "tls"]
+
+[services.concurrency]
+type = "connections"
+hard_limit = 1000
+soft_limit = 800
+
+[[services.tcp_checks]]
+interval = "15s"
+timeout = "2s"
+grace_period = "10s"
+
+[[services.http_checks]]
+interval = "30s"
+timeout = "10s"
+grace_period = "10s"
+method = "GET"
+path = "/optimize/health"
+protocol = "http"
+tls_skip_verify = false
+
+[services.http_checks.headers]
+Content-Type = "application/json"
+
+[[vm]]
+cpu_kind = "shared"
+cpus = 2
+memory_mb = 2048
+
+# Auto-scaling configuration
+[http_service]
+auto_stop_machines = "stop"
+internal_port = 8080
+force_https = true
+auto_start_machines = true
+min_machines_running = 0
+processes = ["app"]
+
+# Resource limits and scaling
+[[vm]]
+size = "shared-cpu-2x"
+
+# Metrics and monitoring
+[metrics]
+port = 9091
+path = "/metrics"

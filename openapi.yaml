@@ -1,0 +1,375 @@
+openapi: 3.0.0
+info:
+  title: EV Charging MILP API
+  description: |
+    Mixed Integer Linear Programming model for EV charging optimization based on the EOS (Energy Optimization System) formulation.
+
+    This API optimizes energy management systems with battery storage and grid interaction capabilities, maximizing economic benefit by:
+    - Minimizing grid import costs
+    - Maximizing export revenue 
+    - Considering final state of charge value
+
+    The optimization model includes:
+    - Power balance constraints
+    - Battery dynamics with charging/discharging efficiency
+    - Grid flow direction constraints
+    - Operating and storage limits
+
+    **Mathematical Formulation:**
+
+    Objective: Maximize Σt(-nt*pN + et*pE) + Σi(si,T*pai)
+
+    Subject to:
+    - Power balance: Σi(ci,t - di,t) + ft + nt = et + gt ∀t
+    - Battery dynamics: si,t+1 = si,t + ηc*ci,t - (1/ηd)*di,t ∀t,i
+    - Grid flow constraints when pN ≤ pE
+    - Operating limits: 0 ≤ ci,t, di,t ≤ kmax_i
+    - Storage limits: smin_i ≤ si,t ≤ smax_i
+  version: 1.0.0
+  contact:
+    name: EV Charging Optimization API
+    email: support@example.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:5000
+    description: Development server
+  - url: https://api.example.com
+    description: Production server
+
+paths:
+  /optimize/charge-schedule:
+    post:
+      tags:
+        - optimization
+      summary: Optimize EV charging schedule
+      description: |
+        Solves a Mixed Integer Linear Programming problem to optimize EV charging schedules.
+
+        The optimization considers:
+        - Multiple battery types (EV batteries, PV storage)
+        - Time-varying energy demands and production forecasts
+        - Dynamic grid import/export prices
+        - Battery operational constraints
+        - Charging/discharging efficiency losses
+
+        Returns optimal charging/discharging schedules for all batteries and grid interactions.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OptimizationInput"
+            example:
+              batteries:
+                - type: "eauto"
+                  s_min: 5000
+                  s_max: 50000
+                  s_initial: 15000
+                  k_max: 7000
+                  p_a: 0.25
+                - type: "pv"
+                  s_min: 1000
+                  s_max: 20000
+                  s_initial: 5000
+                  k_max: 5000
+                  p_a: 0.20
+              time_series:
+                gt: [3000, 4000, 5000, 4500, 3500, 3000]
+                ft: [2000, 6000, 8000, 7000, 4000, 1000]
+                p_N: [0.30, 0.25, 0.20, 0.22, 0.28, 0.32]
+                p_E: [0.15, 0.12, 0.10, 0.11, 0.14, 0.16]
+              eta_c: 0.95
+              eta_d: 0.95
+              M: 1000000
+      responses:
+        "200":
+          description: Optimization completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OptimizationResult"
+              example:
+                status: "Optimal"
+                objective_value: 1250.75
+                batteries:
+                  - type: "eauto"
+                    charging_power: [7000, 0, 0, 0, 0, 0]
+                    discharging_power: [0, 2000, 3000, 2500, 1500, 1000]
+                    state_of_charge: [21650, 19650, 16650, 14150, 12650, 11650]
+                  - type: "pv"
+                    charging_power: [0, 2000, 3000, 2500, 0, 0]
+                    discharging_power: [0, 0, 0, 0, 500, 1000]
+                    state_of_charge: [5000, 6900, 9755, 12130, 11635, 10635]
+                grid_import: [1000, 0, 0, 0, 0, 2000]
+                grid_export: [0, 2000, 3000, 2500, 500, 0]
+                flow_direction: [0, 1, 1, 1, 1, 0]
+        "400":
+          description: Bad request - Invalid input data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                message: "All time series must have the same length"
+        "500":
+          description: Internal server error - Optimization failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                message: "Optimization failed: Infeasible problem"
+
+  /optimize/health:
+    get:
+      tags:
+        - health
+      summary: Health check
+      description: Check if the API service is running and healthy
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "healthy"
+                  message:
+                    type: string
+                    example: "EV Charging MILP API is running"
+
+  /optimize/example:
+    get:
+      tags:
+        - examples
+      summary: Get example input data
+      description: Returns example input data that can be used to test the optimization endpoint
+      responses:
+        "200":
+          description: Example data returned successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OptimizationInput"
+
+components:
+  schemas:
+    BatteryConfig:
+      type: object
+      required:
+        - type
+        - s_min
+        - s_max
+        - s_initial
+        - k_max
+        - p_a
+      properties:
+        type:
+          type: string
+          enum: [pv, eauto]
+          description: |
+            Battery type identifier:
+            - 'pv': Photovoltaic storage battery
+            - 'eauto': Electric vehicle battery
+          example: "eauto"
+        s_min:
+          type: number
+          minimum: 0
+          description: Minimum state of charge in Wh
+          example: 5000
+        s_max:
+          type: number
+          minimum: 0
+          description: Maximum state of charge in Wh
+          example: 50000
+        s_initial:
+          type: number
+          minimum: 0
+          description: Initial state of charge in Wh
+          example: 15000
+        k_max:
+          type: number
+          minimum: 0
+          description: Maximum charge/discharge power in W
+          example: 7000
+        p_a:
+          type: number
+          minimum: 0
+          description: Value per Wh at end of time horizon (economic value of remaining energy)
+          example: 0.25
+
+    TimeSeries:
+      type: object
+      required:
+        - gt
+        - ft
+        - p_N
+        - p_E
+      properties:
+        gt:
+          type: array
+          items:
+            type: number
+            minimum: 0
+          description: Required total energy demand at each time step (Wh)
+          example: [3000, 4000, 5000, 4500, 3500, 3000]
+        ft:
+          type: array
+          items:
+            type: number
+            minimum: 0
+          description: Forecasted energy production (e.g., solar PV) at each time step (Wh)
+          example: [2000, 6000, 8000, 7000, 4000, 1000]
+        p_N:
+          type: array
+          items:
+            type: number
+            minimum: 0
+          description: Grid import price per Wh at each time step (currency units/Wh)
+          example: [0.30, 0.25, 0.20, 0.22, 0.28, 0.32]
+        p_E:
+          type: array
+          items:
+            type: number
+            minimum: 0
+          description: Grid export price per Wh at each time step (currency units/Wh)
+          example: [0.15, 0.12, 0.10, 0.11, 0.14, 0.16]
+
+    OptimizationInput:
+      type: object
+      required:
+        - batteries
+        - time_series
+      properties:
+        batteries:
+          type: array
+          items:
+            $ref: "#/components/schemas/BatteryConfig"
+          minItems: 1
+          description: Configuration for all batteries in the system
+        time_series:
+          $ref: "#/components/schemas/TimeSeries"
+        eta_c:
+          type: number
+          minimum: 0
+          maximum: 1
+          default: 0.95
+          description: Charging efficiency (0 to 1)
+          example: 0.95
+        eta_d:
+          type: number
+          minimum: 0
+          maximum: 1
+          default: 0.95
+          description: Discharging efficiency (0 to 1)
+          example: 0.95
+        M:
+          type: number
+          minimum: 0
+          default: 1000000
+          description: Big M parameter for binary constraints (should be sufficiently large)
+          example: 1000000
+
+    BatteryResult:
+      type: object
+      properties:
+        type:
+          type: string
+          description: Battery type identifier
+          example: "eauto"
+        charging_power:
+          type: array
+          items:
+            type: number
+            minimum: 0
+          description: Optimal charging power at each time step (W)
+          example: [7000, 0, 0, 0, 0, 0]
+        discharging_power:
+          type: array
+          items:
+            type: number
+            minimum: 0
+          description: Optimal discharging power at each time step (W)
+          example: [0, 2000, 3000, 2500, 1500, 1000]
+        state_of_charge:
+          type: array
+          items:
+            type: number
+            minimum: 0
+          description: State of charge at each time step (Wh)
+          example: [21650, 19650, 16650, 14150, 12650, 11650]
+
+    OptimizationResult:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [Optimal, Infeasible, Unbounded, Undefined, Not Solved]
+          description: |
+            Optimization solver status:
+            - Optimal: Problem solved to optimality
+            - Infeasible: No feasible solution exists
+            - Unbounded: Objective function is unbounded
+            - Undefined: Problem status is undefined
+            - Not Solved: Problem was not solved
+          example: "Optimal"
+        objective_value:
+          type: number
+          nullable: true
+          description: Optimal objective function value (economic benefit in currency units). Null if not optimal.
+          example: 1250.75
+        batteries:
+          type: array
+          items:
+            $ref: "#/components/schemas/BatteryResult"
+          description: Optimization results for each battery
+        grid_import:
+          type: array
+          items:
+            type: number
+            minimum: 0
+          description: Energy imported from grid at each time step (Wh)
+          example: [1000, 0, 0, 0, 0, 2000]
+        grid_export:
+          type: array
+          items:
+            type: number
+            minimum: 0
+          description: Energy exported to grid at each time step (Wh)
+          example: [0, 2000, 3000, 2500, 500, 0]
+        flow_direction:
+          type: array
+          items:
+            type: integer
+            enum: [0, 1]
+          description: |
+            Binary flow direction at each time step:
+            - 0: Import from grid
+            - 1: Export to grid
+          example: [0, 1, 1, 1, 1, 0]
+
+    Error:
+      type: object
+      properties:
+        message:
+          type: string
+          description: Error message describing what went wrong
+          example: "All time series must have the same length"
+
+tags:
+  - name: optimization
+    description: EV charging schedule optimization operations
+  - name: health
+    description: Service health monitoring
+  - name: examples
+    description: Example data for testing
+
+externalDocs:
+  description: Learn more about MILP optimization
+  url: https://en.wikipedia.org/wiki/Integer_programming
