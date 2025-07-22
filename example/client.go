@@ -57,7 +57,7 @@ func main() {
 	}
 
 	table := tablewriter.NewTable(os.Stdout)
-	headers := []string{"Hour", "FlowDirection", "GridImport", "GridExport"}
+	headers := []string{"Hour", "Forecast", "FlowDirection", "GridImport", "GridExport"}
 
 	for i := range *res.Batteries {
 		headers = append(headers, []string{
@@ -72,6 +72,7 @@ func main() {
 	for i := range len(*res.FlowDirection) {
 		row := []string{
 			strconv.Itoa(i),
+			strconv.Itoa(int((req.TimeSeries.Ft)[i])),
 			strconv.Itoa(int((*res.FlowDirection)[i])),
 			strconv.Itoa(int((*res.GridImport)[i])),
 			strconv.Itoa(int((*res.GridExport)[i])),
