@@ -60,9 +60,6 @@ type BatteryResult struct {
 
 	// StateOfCharge State of charge at each time step (Wh)
 	StateOfCharge *[]float32 `json:"state_of_charge,omitempty"`
-
-	// Type Battery type identifier
-	Type *string `json:"type,omitempty"`
 }
 
 // Error defines model for Error.
@@ -128,6 +125,9 @@ type OptimizationResultStatus string
 
 // TimeSeries defines model for TimeSeries.
 type TimeSeries struct {
+	// BGoal Goal state of charge for each battery at each time step (Wh) - nested list [battery][time_step]
+	BGoal *[][]float32 `json:"b_goal,omitempty"`
+
 	// Ft Forecasted energy production (e.g., solar PV) at each time step (Wh)
 	Ft []float32 `json:"ft"`
 

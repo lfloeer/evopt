@@ -7,6 +7,7 @@ tool github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen
 require (
 	github.com/oapi-codegen/oapi-codegen/v2 v2.5.0
 	github.com/olekukonko/tablewriter v1.0.8
+	github.com/samber/lo v1.51.0
 )
 
 require (
