@@ -15,6 +15,7 @@ ns = api.namespace('optimize', description='EV Charging Optimization Operations'
 
 # Input models for API documentation
 battery_config_model = api.model('BatteryConfig', {
+    's_min': fields.Float(required=True, description='Minimum state of charge (Wh)'),
     's_max': fields.Float(required=True, description='Maximum state of charge (Wh)'),
     's_initial': fields.Float(required=True, description='Initial state of charge (Wh)'),
     'c_max': fields.Float(required=True, description='Maximum charge power (W)'),
