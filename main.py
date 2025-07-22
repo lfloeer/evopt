@@ -314,13 +314,13 @@ class ExampleData(Resource):
                     "s_min": 5000,
                     "s_max": 50000,
                     "s_initial": 15000,
-                    "k_max": 7000,
+                    "k_max": 11000,
                     "p_a": 0.25
                 },
                 {
                     "type": "pv",
                     "s_min": 1000,
-                    "s_max": 20000,
+                    "s_max": 8000,
                     "s_initial": 5000,
                     "k_max": 5000,
                     "p_a": 0.20
