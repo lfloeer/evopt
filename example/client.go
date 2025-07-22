@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -35,8 +34,8 @@ func main() {
 
 	req := *example.JSON200
 	{
-		b, _ := json.MarshalIndent(req, "", "  ")
-		fmt.Println(string(b))
+		// b, _ := json.MarshalIndent(req, "", "  ")
+		// fmt.Println(string(b))
 	}
 
 	tw := tablewriter.WithConfig(tablewriter.Config{
@@ -61,7 +60,7 @@ func main() {
 
 		for t := range len(req.TimeSeries.Ft) {
 			row := []string{
-				strconv.Itoa(t),
+				strconv.Itoa(t + 1),
 				strconv.Itoa(int((req.TimeSeries.Ft)[t])),
 				strconv.Itoa(int((req.TimeSeries.Gt)[t])),
 				str2((req.TimeSeries.PN)[t]),
@@ -95,8 +94,8 @@ func main() {
 
 	res := *resp.JSON200
 	{
-		b, _ := json.MarshalIndent(res, "", "  ")
-		fmt.Println(string(b))
+		// b, _ := json.MarshalIndent(res, "", "  ")
+		// fmt.Println(string(b))
 	}
 
 	{
