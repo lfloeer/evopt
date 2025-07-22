@@ -102,7 +102,8 @@ func main() {
 	{
 		table := tablewriter.NewTable(os.Stdout, tw)
 		headers := []string{
-			"Hour", "Forecast",
+			"Hour",
+			// "Forecast",
 			// "FlowDirection",
 			"GridImport", "GridExport",
 		}
@@ -119,8 +120,8 @@ func main() {
 
 		for t := range len(*res.FlowDirection) {
 			row := []string{
-				strconv.Itoa(t),
-				str((req.TimeSeries.Ft)[t]),
+				strconv.Itoa(t + 1),
+				// str((req.TimeSeries.Ft)[t]),
 				// str((*res.FlowDirection)[t]),
 				str((*res.GridImport)[t]),
 				str((*res.GridExport)[t]),
