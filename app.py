@@ -155,7 +155,7 @@ class EVChargingOptimizer:
         for t in time_steps:
             battery_net_power = 0
             for i, bat in enumerate(self.batteries):
-                battery_net_power += (self.variables['c'][i][t] - 
+                battery_net_power += (-self.variables['c'][i][t] + 
                                     self.variables['d'][i][t])
             
             self.problem += (battery_net_power + self.time_series.ft[t] + 
