@@ -23,7 +23,7 @@ info:
     - Power balance: Σi(ci,t - di,t) + ft + nt = et + gt ∀t
     - Battery dynamics: si,t+1 = si,t + ηc*ci,t - (1/ηd)*di,t ∀t,i
     - Grid flow constraints when pN ≤ pE
-    - Operating limits: 0 ≤ ci,t, di,t ≤ kmax_i
+    - Operating limits: 0 ≤ ci,t ≤ cmax_i, 0 ≤ di,t ≤ dmax_i
     - Storage limits: smin_i ≤ si,t ≤ smax_i
   version: 1.0.0
   contact:
@@ -49,7 +49,7 @@ paths:
         Solves a Mixed Integer Linear Programming problem to optimize EV charging schedules.
 
         The optimization considers:
-        - Multiple battery types (EV batteries, PV storage)
+        - Multiple batteries (EV batteries, PV storage)
         - Time-varying energy demands and production forecasts
         - Dynamic grid import/export prices
         - Battery operational constraints
@@ -64,17 +64,17 @@ paths:
               $ref: "#/components/schemas/OptimizationInput"
             example:
               batteries:
-                - type: "eauto"
-                  s_min: 5000
+                - s_min: 5000
                   s_max: 50000
                   s_initial: 15000
-                  k_max: 7000
+                  c_max: 11000
+                  d_max: 0
                   p_a: 0.25
-                - type: "pv"
-                  s_min: 1000
-                  s_max: 20000
+                - s_min: 1000
+                  s_max: 8000
                   s_initial: 5000
-                  k_max: 5000
+                  c_max: 5000
+                  d_max: 5000
                   p_a: 0.20
               time_series:
                 gt: [3000, 4000, 5000, 4500, 3500, 3000]
@@ -95,12 +95,10 @@ paths:
                 status: "Optimal"
                 objective_value: 1250.75
                 batteries:
-                  - type: "eauto"
-                    charging_power: [7000, 0, 0, 0, 0, 0]
+                  - charging_power: [7000, 0, 0, 0, 0, 0]
                     discharging_power: [0, 2000, 3000, 2500, 1500, 1000]
                     state_of_charge: [21650, 19650, 16650, 14150, 12650, 11650]
-                  - type: "pv"
-                    charging_power: [0, 2000, 3000, 2500, 0, 0]
+                  - charging_power: [0, 2000, 3000, 2500, 0, 0]
                     discharging_power: [0, 0, 0, 0, 500, 1000]
                     state_of_charge: [5000, 6900, 9755, 12130, 11635, 10635]
                 grid_import: [1000, 0, 0, 0, 0, 2000]
@@ -163,21 +161,13 @@ components:
     BatteryConfig:
       type: object
       required:
-        - type
         - s_min
         - s_max
         - s_initial
-        - k_max
+        - c_max
+        - d_max
         - p_a
       properties:
-        type:
-          type: string
-          enum: [pv, eauto]
-          description: |
-            Battery type identifier:
-            - 'pv': Photovoltaic storage battery
-            - 'eauto': Electric vehicle battery
-          example: "eauto"
         s_min:
           type: number
           minimum: 0
@@ -193,11 +183,16 @@ components:
           minimum: 0
           description: Initial state of charge in Wh
           example: 15000
-        k_max:
+        c_max:
           type: number
           minimum: 0
-          description: Maximum charge/discharge power in W
-          example: 7000
+          description: Maximum charge power in W
+          example: 11000
+        d_max:
+          type: number
+          minimum: 0
+          description: Maximum discharge power in W
+          example: 5000
         p_a:
           type: number
           minimum: 0
@@ -282,7 +277,7 @@ components:
         type:
           type: string
           description: Battery type identifier
-          example: "eauto"
+          example: "ev"
         charging_power:
           type: array
           items:

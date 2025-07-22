@@ -15,11 +15,10 @@ ns = api.namespace('optimize', description='EV Charging Optimization Operations'
 
 # Input models for API documentation
 battery_config_model = api.model('BatteryConfig', {
-    'type': fields.String(required=True, description='Battery type (pv, eauto)', enum=['pv', 'eauto']),
-    's_min': fields.Float(required=True, description='Minimum state of charge (Wh)'),
     's_max': fields.Float(required=True, description='Maximum state of charge (Wh)'),
     's_initial': fields.Float(required=True, description='Initial state of charge (Wh)'),
-    'k_max': fields.Float(required=True, description='Maximum charge/discharge power (W)'),
+    'c_max': fields.Float(required=True, description='Maximum charge power (W)'),
+    'd_max': fields.Float(required=True, description='Maximum discharge power (W)'),
     'p_a': fields.Float(required=True, description='Value per Wh at end of horizon')
 })
 
@@ -57,11 +56,11 @@ optimization_result_model = api.model('OptimizationResult', {
 
 @dataclass
 class BatteryConfig:
-    type: str
     s_min: float
     s_max: float
     s_initial: float
-    k_max: float
+    c_max: float
+    d_max: float
     p_a: float
 
 @dataclass
@@ -84,36 +83,35 @@ class EVChargingOptimizer:
         self.variables = {}
         
     def create_model(self):
-        """Create the MILP model based on the EOS formulation"""
+        """Create the MILP model"""
         # Create problem
         self.problem = pulp.LpProblem("EV_Charging_Optimization", pulp.LpMaximize)
         
         # Time steps
         time_steps = range(self.T)
-        battery_types = [bat.type for bat in self.batteries]
         
         # Decision variables
         # Charging power variables
         self.variables['c'] = {}
         for i, bat in enumerate(self.batteries):
-            self.variables['c'][bat.type] = [
-                pulp.LpVariable(f"c_{bat.type}_{t}", lowBound=0, upBound=bat.k_max)
+            self.variables['c'][i] = [
+                pulp.LpVariable(f"c_{i}_{t}", lowBound=0, upBound=bat.c_max)
                 for t in time_steps
             ]
         
         # Discharging power variables
         self.variables['d'] = {}
         for i, bat in enumerate(self.batteries):
-            self.variables['d'][bat.type] = [
-                pulp.LpVariable(f"d_{bat.type}_{t}", lowBound=0, upBound=bat.k_max)
+            self.variables['d'][i] = [
+                pulp.LpVariable(f"d_{i}_{t}", lowBound=0, upBound=bat.d_max)
                 for t in time_steps
             ]
         
         # State of charge variables
         self.variables['s'] = {}
         for i, bat in enumerate(self.batteries):
-            self.variables['s'][bat.type] = [
-                pulp.LpVariable(f"s_{bat.type}_{t}", lowBound=bat.s_min, upBound=bat.s_max)
+            self.variables['s'][i] = [
+                pulp.LpVariable(f"s_{i}_{t}", lowBound=bat.s_min, upBound=bat.s_max)
                 for t in time_steps
             ]
         
@@ -141,8 +139,8 @@ class EVChargingOptimizer:
             objective += self.variables['e'][t] * self.time_series.p_E[t]
         
         # Final state of charge value
-        for bat in self.batteries:
-            objective += self.variables['s'][bat.type][-1] * bat.p_a
+        for i, bat in enumerate(self.batteries):
+            objective += self.variables['s'][i][-1] * bat.p_a
         
         self.problem += objective
         
@@ -156,28 +154,28 @@ class EVChargingOptimizer:
         # Constraint (2): Power balance
         for t in time_steps:
             battery_net_power = 0
-            for bat in self.batteries:
-                battery_net_power += (self.variables['c'][bat.type][t] - 
-                                    self.variables['d'][bat.type][t])
+            for i, bat in enumerate(self.batteries):
+                battery_net_power += (self.variables['c'][i][t] - 
+                                    self.variables['d'][i][t])
             
             self.problem += (battery_net_power + self.time_series.ft[t] + 
                            self.variables['n'][t] == 
                            self.variables['e'][t] + self.time_series.gt[t])
         
         # Constraint (3): Battery dynamics
-        for bat in self.batteries:
+        for i, bat in enumerate(self.batteries):
             # Initial state of charge
             if len(time_steps) > 0:
-                self.problem += (self.variables['s'][bat.type][0] == 
-                               bat.s_initial + self.eta_c * self.variables['c'][bat.type][0] -
-                               (1/self.eta_d) * self.variables['d'][bat.type][0])
+                self.problem += (self.variables['s'][i][0] == 
+                               bat.s_initial + self.eta_c * self.variables['c'][i][0] -
+                               (1/self.eta_d) * self.variables['d'][i][0])
             
             # State of charge evolution
             for t in range(1, self.T):
-                self.problem += (self.variables['s'][bat.type][t] == 
-                               self.variables['s'][bat.type][t-1] + 
-                               self.eta_c * self.variables['c'][bat.type][t] -
-                               (1/self.eta_d) * self.variables['d'][bat.type][t])
+                self.problem += (self.variables['s'][i][t] == 
+                               self.variables['s'][i][t-1] + 
+                               self.eta_c * self.variables['c'][i][t] -
+                               (1/self.eta_d) * self.variables['d'][i][t])
         
         # Constraints (4)-(5): Grid flow direction (only when p_N <= p_E)
         for t in time_steps:
@@ -210,12 +208,11 @@ class EVChargingOptimizer:
             }
             
             # Extract battery results
-            for bat in self.batteries:
+            for i, bat in enumerate(self.batteries):
                 battery_result = {
-                    'type': bat.type,
-                    'charging_power': [pulp.value(var) for var in self.variables['c'][bat.type]],
-                    'discharging_power': [pulp.value(var) for var in self.variables['d'][bat.type]],
-                    'state_of_charge': [pulp.value(var) for var in self.variables['s'][bat.type]]
+                    'charging_power': [pulp.value(var) for var in self.variables['c'][i]],
+                    'discharging_power': [pulp.value(var) for var in self.variables['d'][i]],
+                    'state_of_charge': [pulp.value(var) for var in self.variables['s'][i]]
                 }
                 result['batteries'].append(battery_result)
             
@@ -259,11 +256,11 @@ class OptimizeCharging(Resource):
             batteries = []
             for bat_data in data['batteries']:
                 batteries.append(BatteryConfig(
-                    type=bat_data['type'],
                     s_min=bat_data['s_min'],
                     s_max=bat_data['s_max'],
                     s_initial=bat_data['s_initial'],
-                    k_max=bat_data['k_max'],
+                    c_max=bat_data['c_max'],
+                    d_max=bat_data['d_max'],
                     p_a=bat_data['p_a']
                 ))
             
@@ -310,19 +307,19 @@ class ExampleData(Resource):
         example_data = {
             "batteries": [
                 {
-                    "type": "eauto",
                     "s_min": 5000,
                     "s_max": 50000,
                     "s_initial": 15000,
-                    "k_max": 11000,
+                    "c_max": 11000,
+                    "d_max": 0,
                     "p_a": 0.25
                 },
                 {
-                    "type": "pv",
                     "s_min": 1000,
                     "s_max": 8000,
                     "s_initial": 5000,
-                    "k_max": 5000,
+                    "c_max": 5000,
+                    "d_max": 5000,
                     "p_a": 0.20
                 }
             ],

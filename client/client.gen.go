@@ -14,12 +14,6 @@ import (
 	"strings"
 )
 
-// Defines values for BatteryConfigType.
-const (
-	Eauto BatteryConfigType = "eauto"
-	Pv    BatteryConfigType = "pv"
-)
-
 // Defines values for OptimizationResultFlowDirection.
 const (
 	N0 OptimizationResultFlowDirection = 0
@@ -37,8 +31,11 @@ const (
 
 // BatteryConfig defines model for BatteryConfig.
 type BatteryConfig struct {
-	// KMax Maximum charge/discharge power in W
-	KMax float32 `json:"k_max"`
+	// CMax Maximum charge power in W
+	CMax float32 `json:"c_max"`
+
+	// DMax Maximum discharge power in W
+	DMax float32 `json:"d_max"`
 
 	// PA Value per Wh at end of time horizon (economic value of remaining energy)
 	PA float32 `json:"p_a"`
@@ -51,17 +48,7 @@ type BatteryConfig struct {
 
 	// SMin Minimum state of charge in Wh
 	SMin float32 `json:"s_min"`
-
-	// Type Battery type identifier:
-	// - 'pv': Photovoltaic storage battery
-	// - 'eauto': Electric vehicle battery
-	Type BatteryConfigType `json:"type"`
 }
-
-// BatteryConfigType Battery type identifier:
-// - 'pv': Photovoltaic storage battery
-// - 'eauto': Electric vehicle battery
-type BatteryConfigType string
 
 // BatteryResult defines model for BatteryResult.
 type BatteryResult struct {
