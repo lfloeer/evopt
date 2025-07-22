@@ -1,10 +1,20 @@
-default:: 
+DOCKER_IMAGE := andig/evopt
+
+default: build docker-build
 
 build::
 	go generate ./...
 
-server::
-	python3 -m venv .venv && source .venv/bin/activate && python3 main.py
+test::
+	go run example/client.go
 
-docker::
-	docker buildx build . --tag andig/milp --push
+run::
+	python3 -m venv .venv && source .venv/bin/activate && python3 app.py
+
+docker: docker-build docker-run
+
+docker-build::
+	docker buildx build . --tag $(DOCKER_IMAGE) --push
+
+docker-run::
+	docker run -p 7050:7050 -it $(DOCKER_IMAGE)
