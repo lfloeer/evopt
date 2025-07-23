@@ -18,3 +18,6 @@ docker-build::
 
 docker-run::
 	docker run -p 7050:7050 -it $(DOCKER_IMAGE)
+
+fly::
+	fly deploy --local-only

@@ -5,8 +5,32 @@ import numpy as np
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 import json
+import os
+import jwt
 
 app = Flask(__name__)
+
+@app.before_request
+def before_request_func():
+    secret_key = os.environ.get('JWT_TOKEN_SECRET')
+    if secret_key:
+        auth_header = request.headers.get('Authorization')
+        if not auth_header:
+            return jsonify({"message": "Missing authorization header"}), 401
+        
+        try:
+            token_type, token = auth_header.split(' ')
+            if token_type.lower() != 'bearer':
+                return jsonify({"message": "Invalid token type"}), 401
+            
+            jwt.decode(token, secret_key, algorithms=["HS256"])
+        except jwt.ExpiredSignatureError:
+            return jsonify({"message": "Token has expired"}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({"message": "Invalid token"}), 401
+        except Exception as e:
+            return jsonify({"message": str(e)}), 401
+
 api = Api(app, version='1.0', title='EV Charging Optimization API', 
           description='Mixed Integer Linear Programming model for EV charging optimization')
 
