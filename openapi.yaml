@@ -34,7 +34,7 @@ info:
     url: https://opensource.org/licenses/MIT
 
 servers:
-  - url: http://localhost:5000
+  - url: http://localhost:7050
     description: Development server
   - url: https://api.example.com
     description: Production server
@@ -67,12 +67,14 @@ paths:
                 - s_min: 5000
                   s_max: 50000
                   s_initial: 15000
+                  c_min: 4200
                   c_max: 11000
                   d_max: 0
                   p_a: 0.25
                 - s_min: 1000
                   s_max: 8000
                   s_initial: 5000
+                  c_min: 0
                   c_max: 5000
                   d_max: 5000
                   p_a: 0.20
@@ -164,6 +166,7 @@ components:
         - s_min
         - s_max
         - s_initial
+        - c_min
         - c_max
         - d_max
         - p_a
@@ -183,6 +186,11 @@ components:
           minimum: 0
           description: Initial state of charge in Wh
           example: 15000
+        c_min:
+          type: number
+          minimum: 0
+          description: Minimum charge power in W
+          example: 0
         c_max:
           type: number
           minimum: 0

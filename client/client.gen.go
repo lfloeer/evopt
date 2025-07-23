@@ -34,6 +34,9 @@ type BatteryConfig struct {
 	// CMax Maximum charge power in W
 	CMax float32 `json:"c_max"`
 
+	// CMin Minimum charge power in W
+	CMin float32 `json:"c_min"`
+
 	// DMax Maximum discharge power in W
 	DMax float32 `json:"d_max"`
 

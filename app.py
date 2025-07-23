@@ -59,6 +59,7 @@ class BatteryConfig:
     s_min: float
     s_max: float
     s_initial: float
+    c_min: float
     c_max: float
     d_max: float
     p_a: float
@@ -96,7 +97,7 @@ class EVChargingOptimizer:
         self.variables['c'] = {}
         for i, bat in enumerate(self.batteries):
             self.variables['c'][i] = [
-                pulp.LpVariable(f"c_{i}_{t}", lowBound=0, upBound=bat.c_max)
+                pulp.LpVariable(f"c_{i}_{t}", lowBound=bat.c_min, upBound=bat.c_max)
                 for t in time_steps
             ]
         
@@ -267,6 +268,7 @@ class OptimizeCharging(Resource):
                     s_min=bat_data['s_min'],
                     s_max=bat_data['s_max'],
                     s_initial=bat_data['s_initial'],
+                    c_min=bat_data['c_min'],
                     c_max=bat_data['c_max'],
                     d_max=bat_data['d_max'],
                     p_a=bat_data['p_a']
@@ -333,6 +335,7 @@ class ExampleData(Resource):
                     "s_min": 5000,
                     "s_max": 50000,
                     "s_initial": 15000,
+                    "c_min": 4200,
                     "c_max": 11000,
                     "d_max": 0,
                     "p_a": 0.25
@@ -341,6 +344,7 @@ class ExampleData(Resource):
                     "s_min": 1000,
                     "s_max": 8000,
                     "s_initial": 5000,
+                    "c_min": 0,
                     "c_max": 5000,
                     "d_max": 5000,
                     "p_a": 0.20
@@ -356,8 +360,7 @@ class ExampleData(Resource):
                 ]
             },
             "eta_c": 0.95,
-            "eta_d": 0.95,
-            "M": 1000000
+            "eta_d": 0.95
         }
         return example_data
 
