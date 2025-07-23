@@ -36,7 +36,6 @@ optimization_input_model = api.model('OptimizationInput', {
     'time_series': fields.Nested(time_series_model, required=True, description='Time series data'),
     'eta_c': fields.Float(required=False, default=0.95, description='Charging efficiency'),
     'eta_d': fields.Float(required=False, default=0.95, description='Discharging efficiency'),
-    'M': fields.Float(required=False, default=1e6, description='Big M parameter for constraints')
 })
 
 # Output models
@@ -308,7 +307,7 @@ class OptimizeCharging(Resource):
                 time_series=time_series,
                 eta_c=data.get('eta_c', 0.95),
                 eta_d=data.get('eta_d', 0.95),
-                M=data.get('M', 1e6)
+                M=1e6
             )
             
             result = optimizer.solve()

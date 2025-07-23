@@ -273,12 +273,6 @@ components:
           default: 0.95
           description: Discharging efficiency (0 to 1)
           example: 0.95
-        M:
-          type: number
-          minimum: 0
-          default: 1000000
-          description: Big M parameter for binary constraints (should be sufficiently large)
-          example: 1000000
 
     BatteryResult:
       type: object

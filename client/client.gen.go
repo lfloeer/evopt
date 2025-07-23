@@ -70,9 +70,6 @@ type Error struct {
 
 // OptimizationInput defines model for OptimizationInput.
 type OptimizationInput struct {
-	// M Big M parameter for binary constraints (should be sufficiently large)
-	M *float32 `json:"M,omitempty"`
-
 	// Batteries Configuration for all batteries in the system
 	Batteries []BatteryConfig `json:"batteries"`
 
