@@ -296,6 +296,12 @@ class OptimizeCharging(Resource):
             if len(set(lengths)) > 1:
                 api.abort(400, "All time series must have the same length")
             
+        except KeyError as e:
+            api.abort(400, f"Missing required field: {str(e)}")
+        except (TypeError, ValueError) as e:
+            api.abort(400, f"Invalid data format: {str(e)}")
+        
+        try:
             # Create and solve optimizer
             optimizer = EVChargingOptimizer(
                 batteries=batteries,
