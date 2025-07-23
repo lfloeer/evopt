@@ -61,8 +61,8 @@ func main() {
 		for t := range len(req.TimeSeries.Ft) {
 			row := []string{
 				strconv.Itoa(t + 1),
-				strconv.Itoa(int((req.TimeSeries.Ft)[t])),
-				strconv.Itoa(int((req.TimeSeries.Gt)[t])),
+				str((req.TimeSeries.Ft)[t]),
+				str((req.TimeSeries.Gt)[t]),
 				str2((req.TimeSeries.PN)[t]),
 				str2((req.TimeSeries.PE)[t]),
 			}
