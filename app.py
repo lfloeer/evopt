@@ -42,6 +42,8 @@ battery_config_model = api.model('BatteryConfig', {
     's_min': fields.Float(required=True, description='Minimum state of charge (Wh)'),
     's_max': fields.Float(required=True, description='Maximum state of charge (Wh)'),
     's_initial': fields.Float(required=True, description='Initial state of charge (Wh)'),
+    's_goal': fields.List(fields.Float, required=False, description='Goal state of charge at each time step (Wh)'),
+    'c_min': fields.Float(required=True, description='Minimum charge power (W)'),
     'c_max': fields.Float(required=True, description='Maximum charge power (W)'),
     'd_max': fields.Float(required=True, description='Maximum discharge power (W)'),
     'p_a': fields.Float(required=True, description='Value per Wh at end of horizon')
@@ -52,7 +54,6 @@ time_series_model = api.model('TimeSeries', {
     'ft': fields.List(fields.Float, required=True, description='Forecasted energy production at each time step (Wh)'),
     'p_N': fields.List(fields.Float, required=True, description='Price per Wh taken from grid at each time step'),
     'p_E': fields.List(fields.Float, required=True, description='Price per Wh fed into grid at each time step'),
-    'b_goal': fields.List(fields.List(fields.Float), required=False, description='Goal state of charge for each battery at each time step (Wh) - nested list [battery][time_step]'),
 })
 
 optimization_input_model = api.model('OptimizationInput', {
@@ -87,6 +88,7 @@ class BatteryConfig:
     c_max: float
     d_max: float
     p_a: float
+    s_goal: Optional[List[float]] = None  # Goal state of charge (Wh)
 
 @dataclass
 class TimeSeriesData:
@@ -94,7 +96,6 @@ class TimeSeriesData:
     ft: List[float]  # Forecasted production
     p_N: List[float]  # Import prices
     p_E: List[float]  # Export prices
-    b_goal: Optional[List[List[float]]] = None  # Goal state of charge for each battery (Wh)
 
 class EVChargingOptimizer:
     def __init__(self, batteries: List[BatteryConfig], time_series: TimeSeriesData, 
@@ -121,7 +122,7 @@ class EVChargingOptimizer:
         self.variables['c'] = {}
         for i, bat in enumerate(self.batteries):
             self.variables['c'][i] = [
-                pulp.LpVariable(f"c_{i}_{t}", lowBound=bat.c_min, upBound=bat.c_max)
+                pulp.LpVariable(f"c_{i}_{t}", lowBound=0, upBound=bat.c_max)
                 for t in time_steps
             ]
         
@@ -214,7 +215,13 @@ class EVChargingOptimizer:
                                self.eta_c * self.variables['c'][i][t] -
                                (1/self.eta_d) * self.variables['d'][i][t])
 
-            # Minimum charge power limits
+            # Constraint (6): Battery SOC goal constraints (for t > 0)
+            if bat.s_goal is not None:
+                for t in range(1, self.T):
+                    if bat.s_goal[t] > 0:
+                        self.problem += (self.variables['s'][i][t] >= bat.s_goal[t])
+
+            # Constraint (7): Minimum charge power limits
             if bat.c_min > 0:
                 for t in time_steps:
                     # Lower bound: either 0 or at least c_min
@@ -227,14 +234,7 @@ class EVChargingOptimizer:
                 self.problem += self.variables['e'][t] <= self.M * self.variables['y'][t]
                 # Import constraint
                 self.problem += self.variables['n'][t] <= self.M * (1 - self.variables['y'][t])
-        
-        # Constraint (6): Battery SOC goal constraints (for t > 0)
-        if self.time_series.b_goal is not None:
-            for i, b_goal in enumerate(self.time_series.b_goal):
-                for t in range(1, self.T):
-                    if b_goal[t] > 0:
-                        self.problem += (self.variables['s'][i][t] >= b_goal[t])
-    
+            
     def solve(self) -> Dict:
         """Solve the optimization problem and return results"""
         if self.problem is None:
@@ -309,10 +309,11 @@ class OptimizeCharging(Resource):
                     s_min=bat_data['s_min'],
                     s_max=bat_data['s_max'],
                     s_initial=bat_data['s_initial'],
+                    s_goal=bat_data.get('s_goal'),
                     c_min=bat_data['c_min'],
                     c_max=bat_data['c_max'],
                     d_max=bat_data['d_max'],
-                    p_a=bat_data['p_a']
+                    p_a=bat_data['p_a'],
                 ))
             
             # Parse time series data
@@ -321,19 +322,16 @@ class OptimizeCharging(Resource):
                 ft=data['time_series']['ft'],
                 p_N=data['time_series']['p_N'],
                 p_E=data['time_series']['p_E'],
-                b_goal=data['time_series'].get('b_goal')
             )
 
             # Validate time series lengths
             lengths = [len(time_series.gt), len(time_series.ft), 
                       len(time_series.p_N), len(time_series.p_E)]
 
-            # Validate b_goal if provided
-            if time_series.b_goal is not None:
-                if len(time_series.b_goal) > len(batteries):
-                    api.abort(400, f"Battery goals must have same or lower length than batteries ({len(batteries)}), got {len(time_series.b_goal)}")
-                for goal in time_series.b_goal:
-                    lengths.append(len(goal))
+            # Validate s_goal if provided
+            for i, bat in enumerate(batteries):
+                if bat.s_goal is not None:
+                    lengths.append(len(bat.s_goal))
 
             if len(set(lengths)) > 1:
                 api.abort(400, "All time series must have the same length")
@@ -376,6 +374,7 @@ class ExampleData(Resource):
                     "s_min": 5000,
                     "s_max": 50000,
                     "s_initial": 15000,
+                    "s_goal": [0, 0, 40000, 0, 0, 0],
                     "c_min": 4200,
                     "c_max": 11000,
                     "d_max": 0,
@@ -395,10 +394,7 @@ class ExampleData(Resource):
                 "gt": [3000, 4000, 5000, 4500, 3500, 3000],  # Required energy
                 "ft": [2000, 6000, 8000, 7000, 4000, 1000],  # PV production
                 "p_N": [0.30, 0.25, 0.20, 0.22, 0.28, 0.32],  # Import prices
-                "p_E": [0.15, 0.12, 0.10, 0.11, 0.14, 0.16],  # Export prices
-                "b_goal": [
-                    [0, 0, 40000, 0, 0, 0]  # Battery 1 goals
-                ]
+                "p_E": [0.15, 0.12, 0.10, 0.11, 0.14, 0.16]  # Export prices
             },
             "eta_c": 0.95,
             "eta_d": 0.95

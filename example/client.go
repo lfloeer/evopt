@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -15,6 +17,9 @@ import (
 )
 
 func main() {
+	vFlag := flag.Bool("v", false, "verbose output")
+	flag.Parse()
+
 	// custom HTTP client
 	hc := http.Client{}
 
@@ -33,9 +38,9 @@ func main() {
 	}
 
 	req := *example.JSON200
-	{
-		// b, _ := json.MarshalIndent(req, "", "  ")
-		// fmt.Println(string(b))
+	if *vFlag {
+		b, _ := json.MarshalIndent(req, "", "  ")
+		fmt.Println(string(b))
 	}
 
 	tw := tablewriter.WithConfig(tablewriter.Config{
@@ -48,8 +53,8 @@ func main() {
 		table := tablewriter.NewTable(os.Stdout, tw)
 		headers := []string{"Hour", "Forecast", "TotalDemand", "GridImportCost", "GridExportCost"}
 
-		for i, goal := range *req.TimeSeries.BGoal {
-			if lo.Sum(goal) > 0 {
+		for i, bat := range req.Batteries {
+			if bat.SGoal != nil && lo.Sum(*bat.SGoal) > 0 {
 				headers = append(headers,
 					fmt.Sprintf("Bat %d Goal", i),
 				)
@@ -67,9 +72,9 @@ func main() {
 				str2((req.TimeSeries.PE)[t]),
 			}
 
-			for _, goal := range *req.TimeSeries.BGoal {
-				if lo.Sum(goal) > 0 {
-					row = append(row, str(goal[t]))
+			for _, bat := range req.Batteries {
+				if bat.SGoal != nil && lo.Sum(*bat.SGoal) > 0 {
+					row = append(row, str((*bat.SGoal)[t]))
 				}
 			}
 
@@ -93,9 +98,13 @@ func main() {
 	}
 
 	res := *resp.JSON200
-	{
-		// b, _ := json.MarshalIndent(res, "", "  ")
-		// fmt.Println(string(b))
+	if *vFlag {
+		b, _ := json.MarshalIndent(res, "", "  ")
+		fmt.Println(string(b))
+	}
+
+	if *res.Status != "Optimal" {
+		log.Fatal("Optimization failed:", string(*res.Status))
 	}
 
 	{

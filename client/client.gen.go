@@ -43,6 +43,9 @@ type BatteryConfig struct {
 	// PA Value per Wh at end of time horizon (economic value of remaining energy)
 	PA float32 `json:"p_a"`
 
+	// SGoal Goal state of charge for this battery at each time step (Wh)
+	SGoal *[]float32 `json:"s_goal,omitempty"`
+
 	// SInitial Initial state of charge in Wh
 	SInitial float32 `json:"s_initial"`
 
@@ -125,9 +128,6 @@ type OptimizationResultStatus string
 
 // TimeSeries defines model for TimeSeries.
 type TimeSeries struct {
-	// BGoal Goal state of charge for each battery at each time step (Wh) - nested list [battery][time_step]
-	BGoal *[][]float32 `json:"b_goal,omitempty"`
-
 	// Ft Forecasted energy production (e.g., solar PV) at each time step (Wh)
 	Ft []float32 `json:"ft"`
 

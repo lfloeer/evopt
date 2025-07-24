@@ -67,6 +67,7 @@ paths:
                 - s_min: 5000
                   s_max: 50000
                   s_initial: 15000
+                  s_goal: [0, 0, 40000, 0, 0, 0]
                   c_min: 4200
                   c_max: 11000
                   d_max: 0
@@ -206,6 +207,13 @@ components:
           minimum: 0
           description: Value per Wh at end of time horizon (economic value of remaining energy)
           example: 0.25
+        s_goal:
+          type: array
+          items:
+            type: number
+            minimum: 0
+          description: Goal state of charge for this battery at each time step (Wh)
+          example: [0, 0, 40000, 0, 0, 0]
 
     TimeSeries:
       type: object
@@ -243,15 +251,6 @@ components:
             minimum: 0
           description: Grid export price per Wh at each time step (currency units/Wh)
           example: [0.15, 0.12, 0.10, 0.11, 0.14, 0.16]
-        b_goal:
-          type: array
-          items:
-            type: array
-            items:
-              type: number
-              minimum: 0
-          description: Goal state of charge for each battery at each time step (Wh) - nested list [battery][time_step]
-          example: [[10000, 15000, 20000], [3000, 5000, 7000]]
 
     OptimizationInput:
       type: object
