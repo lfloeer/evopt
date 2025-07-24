@@ -153,6 +153,17 @@ class EVChargingOptimizer:
             else:
                 self.variables['y'].append(None)
         
+        # Binary variable for charging activation
+        self.variables['z_c'] = {}
+        for i, bat in enumerate(self.batteries):
+            if bat.c_min > 0:
+                self.variables['z_c'][i] = [
+                    pulp.LpVariable(f"z_c_{i}_{t}", cat='Binary')
+                    for t in time_steps
+                ]
+            else:
+                self.variables['z_c'][i] = None
+            
         # Objective function (1): Maximize economic benefit
         objective = 0
         
@@ -202,7 +213,13 @@ class EVChargingOptimizer:
                                self.variables['s'][i][t-1] + 
                                self.eta_c * self.variables['c'][i][t] -
                                (1/self.eta_d) * self.variables['d'][i][t])
-        
+
+            # Minimum charge power limits
+            if bat.c_min > 0:
+                for t in time_steps:
+                    # Lower bound: either 0 or at least c_min
+                    self.problem += self.variables['c'][i][t] >= bat.c_min * self.variables['z_c'][i][t]
+
         # Constraints (4)-(5): Grid flow direction (only when p_N <= p_E)
         for t in time_steps:
             if self.variables['y'][t] is not None:  # Only when p_N <= p_E
