@@ -181,8 +181,15 @@ func main() {
 			asciigraph.Height(*chFlag/2),
 			asciigraph.Caption("Optimization - SoC"),
 			asciigraph.SeriesLegends(socSeries...),
-			asciigraph.SeriesColors(lo.RepeatBy(len(socSeries), func(_ int) asciigraph.AnsiColor {
-				return asciigraph.White
+			asciigraph.SeriesColors(lo.RepeatBy(len(socSeries), func(i int) asciigraph.AnsiColor {
+				switch i % 3 {
+				case 0:
+					return asciigraph.LightGreen
+				case 1:
+					return asciigraph.DarkGreen
+				default:
+					return asciigraph.Green
+				}
 			})...),
 		))
 
@@ -199,11 +206,16 @@ func main() {
 					return asciigraph.Green
 				case 2:
 					return asciigraph.Yellow
+				case 3:
+					return asciigraph.LightGreen
+				case 4:
+					return asciigraph.Orange
+				case 5:
+					return asciigraph.DarkGreen
+				case 6:
+					return asciigraph.DarkRed
 				default:
-					if i%2 == 0 {
-						return asciigraph.Red
-					}
-					return asciigraph.Green
+					return asciigraph.White
 				}
 			})...),
 		))
