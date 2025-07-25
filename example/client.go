@@ -189,8 +189,20 @@ func main() {
 			asciigraph.Height(20),
 			asciigraph.Caption("Optimization - Power Flow"),
 			asciigraph.SeriesLegends(powerSeries...),
-			asciigraph.SeriesColors(lo.RepeatBy(len(powerSeries), func(_ int) asciigraph.AnsiColor {
-				return asciigraph.White
+			asciigraph.SeriesColors(lo.RepeatBy(len(powerSeries), func(i int) asciigraph.AnsiColor {
+				switch i {
+				case 0:
+					return asciigraph.Black
+				case 1:
+					return asciigraph.Green
+				case 2:
+					return asciigraph.Yellow
+				default:
+					if i%2 == 0 {
+						return asciigraph.Red
+					}
+					return asciigraph.Green
+				}
 			})...),
 		))
 	}
