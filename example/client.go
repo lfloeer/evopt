@@ -19,6 +19,8 @@ import (
 
 func main() {
 	vFlag := flag.Bool("v", false, "verbose output")
+	cwFlag := flag.Int("cw", 150, "chart width")
+	chFlag := flag.Int("ch", 20, "chart height")
 	flag.Parse()
 
 	// custom HTTP client
@@ -164,8 +166,8 @@ func main() {
 
 		for i, b := range *res.Batteries {
 			powerSeries = append(powerSeries,
-				fmt.Sprintf("Bat %d ChargingPower", i+1),
-				fmt.Sprintf("Bat %d DischargingPower", i+1),
+				fmt.Sprintf("Bat %d Charge Power", i+1),
+				fmt.Sprintf("Bat %d Discharge Power", i+1),
 			)
 			socSeries = append(socSeries, fmt.Sprintf("Bat %d SoC", i+1))
 
@@ -175,8 +177,8 @@ func main() {
 		}
 
 		fmt.Println(asciigraph.PlotMany(soc, asciigraph.Precision(1),
-			asciigraph.Width(150),
-			asciigraph.Height(10),
+			asciigraph.Width(*cwFlag),
+			asciigraph.Height(*chFlag/2),
 			asciigraph.Caption("Optimization - SoC"),
 			asciigraph.SeriesLegends(socSeries...),
 			asciigraph.SeriesColors(lo.RepeatBy(len(socSeries), func(_ int) asciigraph.AnsiColor {
@@ -185,8 +187,8 @@ func main() {
 		))
 
 		fmt.Println(asciigraph.PlotMany(power, asciigraph.Precision(0),
-			asciigraph.Width(150),
-			asciigraph.Height(20),
+			asciigraph.Width(*cwFlag),
+			asciigraph.Height(*chFlag),
 			asciigraph.Caption("Optimization - Power Flow"),
 			asciigraph.SeriesLegends(powerSeries...),
 			asciigraph.SeriesColors(lo.RepeatBy(len(powerSeries), func(i int) asciigraph.AnsiColor {
