@@ -40,7 +40,7 @@ type BatteryConfig struct {
 	// DMax Maximum discharge power in W
 	DMax float32 `json:"d_max"`
 
-	// PA Value per Wh at end of time horizon (economic value of remaining energy)
+	// PA Monetary value of the stored energy per Wh at end of time horizon
 	PA float32 `json:"p_a"`
 
 	// SGoal Goal state of charge for this battery at each time step (Wh)
@@ -58,10 +58,10 @@ type BatteryConfig struct {
 
 // BatteryResult defines model for BatteryResult.
 type BatteryResult struct {
-	// ChargingPower Optimal charging power at each time step (W)
+	// ChargingPower Optimal charging energy at each time step (Wh)
 	ChargingPower *[]float32 `json:"charging_power,omitempty"`
 
-	// DischargingPower Optimal discharging power at each time step (W)
+	// DischargingPower Optimal discharging energy at each time step (Wh)
 	DischargingPower *[]float32 `json:"discharging_power,omitempty"`
 
 	// StateOfCharge State of charge at each time step (Wh)
@@ -128,13 +128,16 @@ type OptimizationResultStatus string
 
 // TimeSeries defines model for TimeSeries.
 type TimeSeries struct {
-	// Ft Forecasted energy production (e.g., solar PV) at each time step (Wh)
+	// Dt Duration in seconds for each time step (s)
+	Dt []float32 `json:"dt"`
+
+	// Ft Forecasted energy generation (e.g., solar PV) at each time step (Wh)
 	Ft []float32 `json:"ft"`
 
-	// Gt Required total energy demand at each time step (Wh)
+	// Gt Household energy demand at each time step (Wh)
 	Gt []float32 `json:"gt"`
 
-	// PE Grid export price per Wh at each time step (currency units/Wh)
+	// PE Grid export remuneration per Wh at each time step (currency units/Wh)
 	PE []float32 `json:"p_E"`
 
 	// PN Grid import price per Wh at each time step (currency units/Wh)
