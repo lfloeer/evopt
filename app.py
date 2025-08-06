@@ -39,6 +39,8 @@ ns = api.namespace('optimize', description='EV Charging Optimization Operations'
 
 # Input models for API documentation
 battery_config_model = api.model('BatteryConfig', {
+    'charge_from_grid': fields.Boolean(required=False, description='Controls whether the battery can be charged from the grid.'),
+    'discharge_to_grid': fields.Boolean(required=False, description='Controls whether the battery can discharge to grid.'),
     's_min': fields.Float(required=True, description='Minimum state of charge (Wh)'),
     's_max': fields.Float(required=True, description='Maximum state of charge (Wh)'),
     's_initial': fields.Float(required=True, description='Initial state of charge (Wh)'),
@@ -83,6 +85,8 @@ optimization_result_model = api.model('OptimizationResult', {
 
 @dataclass
 class BatteryConfig:
+    charge_from_grid: bool
+    discharge_to_grid: bool
     s_min: float
     s_max: float
     s_initial: float
@@ -150,13 +154,13 @@ class EVChargingOptimizer:
         self.variables['n'] = [pulp.LpVariable(f"n_{t}", lowBound=0) for t in time_steps]
         self.variables['e'] = [pulp.LpVariable(f"e_{t}", lowBound=0) for t in time_steps]
         
-        # Binary flow direction variables (only when p_N <= p_E)
+        # Binary variable: power flow direction to / from grid variables
+        # these variables 
+        # 1. avoid direct export from import if export remuneration is greater than import cost
+        # 2. control grid charging to batteries and grid export from batteries acc. to configuration
         self.variables['y'] = []
         for t in time_steps:
-            if self.time_series.p_N[t] <= self.time_series.p_E[t]:
-                self.variables['y'].append(pulp.LpVariable(f"y_{t}", cat='Binary'))
-            else:
-                self.variables['y'].append(None)
+            self.variables['y'].append(pulp.LpVariable(f"y_{t}", cat='Binary'))
         
         # Binary variable for charging activation
         self.variables['z_c'] = {}
@@ -232,27 +236,46 @@ class EVChargingOptimizer:
             if bat.p_demand is not None:
                 for t in range(1, self.T):
                     if bat.p_demand[t] > 0:
-                        # clip required charge to ax charging power if needed 
+                        # clip required charge to max charging power if needed 
                         # and leave some air to breathe for the optimizer
                         p_demand = bat.p_demand[t]
                         if p_demand >= bat.c_max * self.time_series.dt[t] / 3600. :
                             p_demand = bat.c_max * self.time_series.dt[t] / 3600. * 0.9999
                         self.problem += (self.variables['c'][i][t] >= p_demand)
+                    elif bat.c_min > 0:
+                        # in time steps without given charging demand, apply normal lower bound: 
+                        # Lower bound: either 0 or at least c_min
+                        self.problem += (self.variables['c'][i][t] >= bat.c_min * self.time_series.dt[t] / 3600. 
+                                        * self.variables['z_c'][i][t])
+                        self.problem += (self.variables['c'][i][t] <= self.M * self.variables['z_c'][i][t])
 
-            # Constraint (7): Minimum charge power limits
-            if bat.c_min > 0:
-                for t in time_steps:
-                    # Lower bound: either 0 or at least c_min
-                    self.problem += (self.variables['c'][i][t] >= bat.c_min * self.time_series.dt[t] / 3600. 
-                                     * self.variables['z_c'][i][t])
+            else:
+                # Constraint (7): Minimum charge power limits if there is not charge demand
+                if bat.c_min > 0:
+                    for t in time_steps:
+                        # Lower bound: either 0 or at least c_min
+                        self.problem += (self.variables['c'][i][t] >= bat.c_min * self.time_series.dt[t] / 3600. 
+                                        * self.variables['z_c'][i][t])
+                        self.problem += (self.variables['c'][i][t] <= self.M * self.variables['z_c'][i][t])
+                    
+            # control battery charging from grid and discharging to grid
+            if not bat.charge_from_grid:
+                for t in time_steps:  
+                    self.problem += (self.variables['c'][i][t] <= self.M  * self.variables['y'][t])
+            else:
+                continue
+            if not bat.discharge_to_grid:
+                for t in time_steps:  
+                    self.problem += (self.variables['d'][i][t] <= self.M  * (1 - self.variables['y'][t]))
+            else:
+                continue
 
-        # Constraints (4)-(5): Grid flow direction (only when p_N <= p_E)
+        # Constraints (4)-(5): Grid flow direction 
         for t in time_steps:
-            if self.variables['y'][t] is not None:  # Only when p_N <= p_E
-                # Export constraint
-                self.problem += self.variables['e'][t] <= self.M * self.variables['y'][t]
-                # Import constraint
-                self.problem += self.variables['n'][t] <= self.M * (1 - self.variables['y'][t])
+            # Export constraint
+            self.problem += self.variables['e'][t] <= self.M * self.variables['y'][t]
+            # Import constraint
+            self.problem += self.variables['n'][t] <= self.M * (1 - self.variables['y'][t])
             
     def solve(self) -> Dict:
         """Solve the optimization problem and return results"""
@@ -324,7 +347,18 @@ class OptimizeCharging(Resource):
             # Parse battery configurations
             batteries = []
             for bat_data in data['batteries']:
+
+                #Parse optional items
+                charging_from_grid = False
+                if 'charge_from_grid' in bat_data:
+                    charging_from_grid = bat_data['charge_from_grid']
+                discharging_to_grid = False
+                if 'discharge_to_grid' in bat_data:
+                    discharging_to_grid = bat_data['discharge_to_grid']
+                
                 batteries.append(BatteryConfig(
+                    charge_from_grid=charging_from_grid,
+                    discharge_to_grid=discharging_to_grid,
                     s_min=bat_data['s_min'],
                     s_max=bat_data['s_max'],
                     s_initial=bat_data['s_initial'],
@@ -395,26 +429,31 @@ class ExampleData(Resource):
     def get(self):
         """Get example input data for testing the optimization"""
         example_data = {
+
             "batteries": [
                 {
+                    "charge_from_grid": True,
+                    "discharge_to_grid": False,
                     "s_min": 2000,
                     "s_max": 36000,
                     "s_initial": 15000,
-                    "p_demand": [0.0, 920.0, 1920.0, 920.0, 920.0, 920.0, 920.0, 920.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                    "p_demand": [0.0, 920.0, 1920.0, 920.0, 920.0, 920.0, 920.0, 920.0, 350.0, 300.0, 250.0, 200.0, 150.0, 100.0, 50.0, 10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                     "s_goal": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 30000.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                     "c_min": 1380, 
                     "c_max": 3680, 
                     "d_max": 0,
-                    "p_a": 0.00012
+                    "p_a": 0.00013
                 },
                 {
+                    "charge_from_grid": False,
+                    "discharge_to_grid": False,
                     "s_min": 2500,
                     "s_max": 16200,
                     "s_initial": 5000,
                     "c_min": 0,
                     "c_max": 6000, 
                     "d_max": 6000, 
-                    "p_a": 0.00012
+                    "p_a": 0.00013
                 }
             ],
             "time_series": {

@@ -37,13 +37,25 @@ type BatteryConfig struct {
 	// CMin Minimum charge power in W
 	CMin float32 `json:"c_min"`
 
+	// ChargeFromGrid Controls whether the battery can be charged from the grid.
+	//   - True: The battery can be charged from grid at any time. The actual decision is subject
+	//     to the optimization.
+	//   - False: (default) The battery cannot be charged while power is retrieved from grid
+	ChargeFromGrid *bool `json:"charge_from_grid,omitempty"`
+
 	// DMax Maximum discharge power in W
 	DMax float32 `json:"d_max"`
+
+	// DischargeToGrid Controls whether the battery can discharge to grid.
+	//   - True: The battery can discharge to the grid at any time. The actual decision is
+	//     subject to the optimization.
+	//   - False: (default) The battery cannot be discharged while power is exported to the grid.
+	DischargeToGrid *bool `json:"discharge_to_grid,omitempty"`
 
 	// PA Monetary value of the stored energy per Wh at end of time horizon
 	PA float32 `json:"p_a"`
 
-	// PDemand Minimum charging plan for this battery and each time step (Wh)
+	// PDemand Minimum charge demand per time step (Wh)
 	PDemand *[]float32 `json:"p_demand,omitempty"`
 
 	// SGoal Goal state of charge for this battery at each time step (Wh)

@@ -172,6 +172,20 @@ components:
         - d_max
         - p_a
       properties:
+        charge_from_grid:
+          type: boolean
+          description: |
+            Controls whether the battery can be charged from the grid.
+              - True: The battery can be charged from grid at any time. The actual decision is subject
+                to the optimization.
+              - False: (default) The battery cannot be charged while power is retrieved from grid
+        discharge_to_grid:
+          type: boolean
+          description: |
+            Controls whether the battery can discharge to grid.
+              - True: The battery can discharge to the grid at any time. The actual decision is
+                subject to the optimization.
+              - False: (default) The battery cannot be discharged while power is exported to the grid.
         s_min:
           type: number
           minimum: 0
