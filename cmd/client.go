@@ -5,13 +5,16 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/andig/evopt/client"
 	"github.com/guptarohit/asciigraph"
+	_ "github.com/joho/godotenv/autoload"
 	"github.com/olekukonko/tablewriter"
 	"github.com/olekukonko/tablewriter/tw"
 	"github.com/samber/lo"
@@ -22,11 +25,21 @@ func main() {
 	cwFlag := flag.Int("cw", 150, "chart width")
 	chFlag := flag.Int("ch", 20, "chart height")
 	jsonData := flag.String("json", "", "json request")
-	uri := flag.String("uri", "http://localhost:7050", "optimizer uri")
+	uri := flag.String("uri", lo.CoalesceOrEmpty(os.Getenv("URI"), "http://localhost:7050"), "optimizer uri")
 	flag.Parse()
 
+	if fi, _ := os.Stdin.Stat(); fi.Mode()&os.ModeNamedPipe != 0 || fi.Mode()&os.ModeCharDevice == 0 {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			log.Fatal(err)
+		}
+		*jsonData = string(data)
+	}
+
 	// custom HTTP client
-	hc := http.Client{}
+	hc := http.Client{
+		Timeout: 10 * time.Second,
+	}
 
 	c, err := client.NewClientWithResponses(*uri, client.WithHTTPClient(&hc))
 	if err != nil {
@@ -34,7 +47,7 @@ func main() {
 	}
 
 	var req client.OptimizationInput
-	if jsonData != nil {
+	if *jsonData != "" {
 		if err := json.Unmarshal([]byte(*jsonData), &req); err != nil {
 			log.Fatal(err)
 		}
