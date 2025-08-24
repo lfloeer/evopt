@@ -21,29 +21,38 @@ func main() {
 	vFlag := flag.Bool("v", false, "verbose output")
 	cwFlag := flag.Int("cw", 150, "chart width")
 	chFlag := flag.Int("ch", 20, "chart height")
+	jsonData := flag.String("json", "", "json request")
+	uri := flag.String("uri", "http://localhost:7050", "optimizer uri")
 	flag.Parse()
 
 	// custom HTTP client
 	hc := http.Client{}
 
-	c, err := client.NewClientWithResponses("http://localhost:7050", client.WithHTTPClient(&hc))
+	c, err := client.NewClientWithResponses(*uri, client.WithHTTPClient(&hc))
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	example, err := c.GetOptimizeExampleWithResponse(context.TODO())
-	if err != nil {
-		log.Fatal(err)
-	}
+	var req client.OptimizationInput
+	if jsonData != nil {
+		if err := json.Unmarshal([]byte(*jsonData), &req); err != nil {
+			log.Fatal(err)
+		}
+	} else {
+		example, err := c.GetOptimizeExampleWithResponse(context.TODO())
+		if err != nil {
+			log.Fatal(err)
+		}
 
-	if example.StatusCode() != http.StatusOK {
-		log.Fatalf("Expected HTTP 200 but received %d\n%s", example.StatusCode(), string(example.Body))
-	}
+		if example.StatusCode() != http.StatusOK {
+			log.Fatalf("Expected HTTP 200 but received %d\n%s", example.StatusCode(), string(example.Body))
+		}
 
-	req := *example.JSON200
-	if *vFlag {
-		b, _ := json.MarshalIndent(req, "", "  ")
-		fmt.Println(string(b))
+		req := *example.JSON200
+		if *vFlag {
+			b, _ := json.MarshalIndent(req, "", "  ")
+			fmt.Println(string(b))
+		}
 	}
 
 	tw := tablewriter.WithConfig(tablewriter.Config{
