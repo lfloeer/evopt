@@ -25,6 +25,7 @@ func main() {
 	cwFlag := flag.Int("cw", 150, "chart width")
 	chFlag := flag.Int("ch", 20, "chart height")
 	jsonData := flag.String("json", "", "json request")
+	token := flag.String("token", os.Getenv("TOKEN"), "authorization token")
 	uri := flag.String("uri", lo.CoalesceOrEmpty(os.Getenv("URI"), "http://localhost:7050"), "optimizer uri")
 	flag.Parse()
 
@@ -109,7 +110,12 @@ func main() {
 		table.Render()
 	}
 
-	resp, err := c.PostOptimizeChargeScheduleWithResponse(context.TODO(), req)
+	resp, err := c.PostOptimizeChargeScheduleWithResponse(context.TODO(), req, func(ctx context.Context, req *http.Request) error {
+		if *token != "" {
+			req.Header.Set("Authorization", "Bearer "+*token)
+		}
+		return nil
+	})
 	if err != nil {
 		log.Fatal(err)
 	}
