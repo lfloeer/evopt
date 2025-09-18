@@ -37,6 +37,10 @@ func main() {
 		*jsonData = string(data)
 	}
 
+	if *jsonData == "" {
+		log.Fatal("missing json request")
+	}
+
 	// custom HTTP client
 	hc := http.Client{
 		Timeout: 10 * time.Second,
@@ -51,21 +55,6 @@ func main() {
 	if *jsonData != "" {
 		if err := json.Unmarshal([]byte(*jsonData), &req); err != nil {
 			log.Fatal(err)
-		}
-	} else {
-		example, err := c.GetOptimizeExampleWithResponse(context.TODO())
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		if example.StatusCode() != http.StatusOK {
-			log.Fatalf("Expected HTTP 200 but received %d\n%s", example.StatusCode(), string(example.Body))
-		}
-
-		req := *example.JSON200
-		if *vFlag {
-			b, _ := json.MarshalIndent(req, "", "  ")
-			fmt.Println(string(b))
 		}
 	}
 
