@@ -138,7 +138,6 @@ class Optimizer:
         """
 
         # Compute scaling parameters
-        average_export_price = np.average(self.time_series.p_E)
         min_import_price = np.min(self.time_series.p_N)
 
         # Objective function (1): Maximize economic benefit
@@ -239,7 +238,7 @@ class Optimizer:
                                          * self.variables['z_c'][i][t])
                         self.problem += (self.variables['c'][i][t] <= self.M * self.variables['z_c'][i][t])
 
-            # control battery charging from grid 
+            # control battery charging from grid
             if not bat.charge_from_grid:
                 for t in self.time_steps:
                     self.problem += (self.variables['c'][i][t] <= self.M * self.variables['y'][t])
@@ -254,7 +253,7 @@ class Optimizer:
                 # Discharge constraint
                 self.problem += self.variables['d'][i][t] <= self.M * self.variables['z_cd'][i][t]
                 # Charge constraint
-                self.problem += self.variables['c'][i][t] <= self.M * (1 - self.variables['z_cd'][i][t])            
+                self.problem += self.variables['c'][i][t] <= self.M * (1 - self.variables['z_cd'][i][t])
 
         # Constraints (4)-(5): Grid flow direction
         for t in self.time_steps:
