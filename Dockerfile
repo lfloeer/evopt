@@ -21,4 +21,4 @@ COPY *.py .
 EXPOSE 7050
 
 # Run the application
-CMD ["gunicorn", "--bind", "0.0.0.0:7050", "--workers", "4", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:7050", "--workers", "4", "--max-requests", "32", "app:app"]
