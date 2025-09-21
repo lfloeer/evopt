@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
     coinor-cbc \
+    htop \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install Python dependencies
