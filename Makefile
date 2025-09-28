@@ -13,7 +13,6 @@ install::
 
 upgrade::
 	uv lock --upgrade
-	uv export --no-dev --no-hashes --no-emit-project > requirements.txt
 
 lint::
 	uv run ruff format
