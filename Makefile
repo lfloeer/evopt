@@ -6,16 +6,21 @@ build::
 	go generate ./...
 
 test::
-	go run example/client.go
+	uv run pytest
 
 install::
-	python3 -m venv .venv && source .venv/bin/activate && pip install --upgrade -r requirements.txt
+	uv sync
 
 upgrade::
-	python3 -m venv .venv && source .venv/bin/activate && pip install --upgrade $$(pip list --outdated | awk 'NR>2 {print $$1}')
+	uv lock --upgrade
+	uv export --no-dev --no-hashes --no-emit-project > requirements.txt
+
+lint::
+	uv run ruff format
+	uv run ruff check --fix
 
 run::
-	source .venv/bin/activate && python3 app.py
+	uv run python -m evopt.app
 
 docker: docker-build docker-run
 
