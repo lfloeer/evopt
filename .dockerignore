@@ -2,7 +2,9 @@
 *
 
 # Except what we really need
-!requirements.txt
+!uv.lock
+!pyproject.toml
+!README.md
 !src/
 
 # Exclude files in the included directories that we don't want
