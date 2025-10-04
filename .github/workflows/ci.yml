@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, feature/* ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+      - name: Install
+        run: make install
+      - name: Format & Lint
+        run: make lint
+      - name: Test
+        run: make test
+
+  docker:
+    name: Docker
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Build Docker image
+        run: make docker-build
