@@ -117,14 +117,14 @@ class Optimizer:
             if self.batteries[i].s_goal is not None:
                 for t in self.time_steps:
                     if self.batteries[i].s_goal[t] > 0:
-                        self.variables['s_goal_pen'][i][t] = pulp.LpVariable(f"s_goal_pen_{i}_{t}", lowBound = 0)
+                        self.variables['s_goal_pen'][i][t] = pulp.LpVariable(f"s_goal_pen_{i}_{t}", lowBound=0)
 
         # penalty variable for not being able to charge with the required power
         self.variables['p_demand_pen'] = [[None for t in self.time_steps] for i in range(len(self.batteries))]
         for i, bat in enumerate(self.batteries):
             if bat.p_demand is not None:
                 for t in self.time_steps:
-                    self.variables['p_demand_pen'][i][t] = pulp.LpVariable(f"p_demand_pen_{i}_{t}", lowBound = 0)
+                    self.variables['p_demand_pen'][i][t] = pulp.LpVariable(f"p_demand_pen_{i}_{t}", lowBound=0)
 
         # Grid import/export variables [Wh]
         self.variables['n'] = [pulp.LpVariable(f"n_{t}", lowBound=0) for t in self.time_steps]
@@ -190,7 +190,7 @@ class Optimizer:
                 for t in self.time_steps:
                     objective += - self.goal_penalty_power \
                                 * self.variables['p_demand_pen'][i][t] \
-                                * (1 + (self.T - t)/self.T)
+                                * (1 + (self.T - t) / self.T)
 
         # Secondary strategies to implement preferences without impact to actual cost
         # prefer charging first, then grid export
@@ -240,14 +240,14 @@ class Optimizer:
                 self.problem += (self.variables['s'][i][0]
                                  == bat.s_initial
                                  + self.eta_c * self.variables['c'][i][0]
-                                 - (1/self.eta_d) * self.variables['d'][i][0])
+                                 - (1 / self.eta_d) * self.variables['d'][i][0])
 
             # State of charge evolution
             for t in range(1, self.T):
                 self.problem += (self.variables['s'][i][t]
-                                 == self.variables['s'][i][t-1]
+                                 == self.variables['s'][i][t - 1]
                                  + self.eta_c * self.variables['c'][i][t]
-                                 - (1/self.eta_d) * self.variables['d'][i][t])
+                                 - (1 / self.eta_d) * self.variables['d'][i][t])
 
             # Constraint (6): Battery SOC goal constraints (for t > 0)
             if bat.s_goal is not None:

@@ -27,7 +27,8 @@ dev = ["pytest>=8.4.2", "ruff>=0.12.12"]
 
 [tool.ruff]
 line-length = 160
+preview = true
 
 [tool.ruff.lint]
 select = ["F", "I", "E", "W", "PL"]
-ignore = ["PLR0912", "PLR0913", "PLR2004"]
+ignore = ["PLR0912", "PLR0913", "PLR2004", "PLR0917", "PLR6301"]
