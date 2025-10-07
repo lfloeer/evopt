@@ -12,6 +12,7 @@ upgrade::
 	uv lock --upgrade
 
 lint::
+	uv run autopep8 . --in-place
 	uv run ruff check --fix
 
 test::

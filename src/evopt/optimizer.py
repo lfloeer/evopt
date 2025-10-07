@@ -189,8 +189,8 @@ class Optimizer:
             if bat.p_demand is not None:
                 for t in self.time_steps:
                     objective += - self.goal_penalty_power \
-                                * self.variables['p_demand_pen'][i][t] \
-                                * (1 + (self.T - t) / self.T)
+                        * self.variables['p_demand_pen'][i][t] \
+                        * (1 + (self.T - t) / self.T)
 
         # Secondary strategies to implement preferences without impact to actual cost
         # prefer charging first, then grid export
