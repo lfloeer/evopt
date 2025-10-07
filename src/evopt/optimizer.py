@@ -273,14 +273,13 @@ class Optimizer:
                                          * self.variables['z_c'][i][t])
                         self.problem += (self.variables['c'][i][t] <= self.M * self.variables['z_c'][i][t])
 
-            else:
-                # Constraint (7): Minimum charge power limits if there is not charge demand
-                if bat.c_min > 0:
-                    for t in self.time_steps:
-                        # Lower bound: either 0 or at least c_min
-                        self.problem += (self.variables['c'][i][t] >= bat.c_min * self.time_series.dt[t] / 3600.
-                                         * self.variables['z_c'][i][t])
-                        self.problem += (self.variables['c'][i][t] <= self.M * self.variables['z_c'][i][t])
+            # Constraint (7): Minimum charge power limits if there is not charge demand
+            elif bat.c_min > 0:
+                for t in self.time_steps:
+                    # Lower bound: either 0 or at least c_min
+                    self.problem += (self.variables['c'][i][t] >= bat.c_min * self.time_series.dt[t] / 3600.
+                                     * self.variables['z_c'][i][t])
+                    self.problem += (self.variables['c'][i][t] <= self.M * self.variables['z_c'][i][t])
 
             # control battery charging from grid
             if not bat.charge_from_grid:
