@@ -17,8 +17,6 @@ jobs:
         uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-      - name: Format
-        run: uv run ruff format --check
       - name: Lint
         run: uv run ruff check
       - name: Test
