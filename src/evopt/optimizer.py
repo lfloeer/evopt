@@ -110,7 +110,7 @@ class Optimizer:
             ]
 
         # penalty variable for not reaching given charge goals
-        # variables are kept in a matrix Batteries X Timesteps, only those elements will have an
+        # variables are kept in a matrix Batteries X time steps, only those elements will have an
         # entry != None that have a SOC goal > 0 defined in the input data
         self.variables['s_goal_pen'] = [[None for t in self.time_steps] for i in range(len(self.batteries))]
         for i, bat in enumerate(self.batteries):
@@ -177,7 +177,7 @@ class Optimizer:
         for i, bat in enumerate(self.batteries):
             objective += self.variables['s'][i][-1] * bat.p_a
 
-        # Penalites for goals that cannot be met
+        # Penalties for goals that cannot be met
         for i, bat in enumerate(self.batteries):
             # unmet battery charging goals
             if self.batteries[i].s_goal is not None:
