@@ -31,7 +31,9 @@ dev = [
 
 [tool.autopep8]
 max_line_length = 160
-recursive = true
+# Can't set recursive here as it breaks
+# the autopep8 extension for VSCode
+# recursive = true
 
 [tool.ruff]
 line-length = 160

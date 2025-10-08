@@ -18,7 +18,7 @@ jobs:
         with:
           enable-cache: true
       - name: Format
-        run: uv run autopep8 --exit-code --diff . 
+        run: uv run autopep8 --recursive --exit-code --diff . 
       - name: Lint
         run: uv run ruff check
       - name: Test
