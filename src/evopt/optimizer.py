@@ -82,7 +82,7 @@ class Optimizer:
 
     def _setup_variables(self):
         """
-        Set up the variables of the milp optimizer
+        Set up the variables of the MILP optimizer
         """
 
         # Charging power variables [Wh]
