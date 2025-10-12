@@ -4,6 +4,8 @@ from typing import Dict, List, Optional
 import numpy as np
 import pulp
 
+from .settings import OptimizerSettings
+
 
 @dataclass
 class OptimizationStrategy:
@@ -42,10 +44,12 @@ class Optimizer:
     """
 
     def __init__(self, strategy: OptimizationStrategy, batteries: List[BatteryConfig], time_series: TimeSeriesData,
-                 eta_c: float = 0.95, eta_d: float = 0.95, M: float = 1e6):
+                 eta_c: float = 0.95, eta_d: float = 0.95, M: float = 1e6, optimizer_settings: OptimizerSettings | None = None):
         """
         Constructor
         """
+
+        self.settings = optimizer_settings or OptimizerSettings()
 
         self.strategy = strategy
         self.batteries = batteries
@@ -315,7 +319,11 @@ class Optimizer:
             self.create_model()
 
         # Solve the problem
-        solver = pulp.PULP_CBC_CMD(msg=0)  # Silent solver
+        solver = pulp.PULP_CBC_CMD(
+            msg=0,
+            threads=self.settings.num_threads,
+            timeLimit=self.settings.time_limit,
+        )
         self.problem.solve(solver)
 
         # Extract results
