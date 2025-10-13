@@ -93,5 +93,7 @@ The test suite is run with `make test`.
 To add a new dependency to the project, run `uv add <dependency>`.
 To upgrade all depdendencies to their latest version, run `make upgrade`.
 
+To make sure that your contributes pass the CI pipeline, make sure you run `make lint` and `make test` before comitting or pushing your code.
+
 If you are using VSCode, we recommend the [Python](https://marketplace.visualstudio.com/items?itemName=ms-python.python), [autopep8](https://marketplace.visualstudio.com/items?itemName=ms-python.autopep8), and [ruff](https://marketplace.visualstudio.com/items?itemName=charliermarsh.ruff) extensions.
 Set up `autopep8` as your formatter for Python files.
