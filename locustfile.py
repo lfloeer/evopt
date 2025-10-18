@@ -4,7 +4,7 @@ from pathlib import Path
 
 from locust import HttpUser, task
 
-scenarios = [json.loads(path.read_text()) for path in Path("tests/examples").glob("scenario_*.json")]
+scenarios = [json.loads(path.read_text())["request"] for path in Path("test_cases").glob("*.json")]
 
 
 class EVCCUser(HttpUser):
