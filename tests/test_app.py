@@ -1,23 +1,29 @@
+import glob
 import json
-import pathlib
 
+import numpy
 import pytest
 
 from evopt.app import app
 
 
-@pytest.mark.parametrize("scenario_path", [path for path in pathlib.Path(__file__).parent.glob("examples/scenario_*.json")])
-def test_charge_schedule(scenario_path: pathlib.Path):
-    """
-    Test the /optimize endpoint of the EV optimization API.
-    This test checks if the endpoint correctly processes a sample input
-    and returns the expected output structure.
-    """
-
+@pytest.mark.parametrize('test_case', glob.glob('test_cases/*.json'))
+def test_optimizer(test_case: str):
     client = app.test_client()
 
-    json_payload = json.loads(scenario_path.read_text())
-    response = client.post("/optimize/charge-schedule", json=json_payload)
+    response = None
+    print(test_case)
+    with open(f'{test_case}') as f:
+        test_data = json.load(f)
+        f.close()
+
+    request = test_data.get("request", {})
+    expected_response = test_data.get("expected_response", {})
+
+    response = client.post("/optimize/charge-schedule", json=request)
 
     assert response.status_code == 200
-    assert response.json["status"] == "Optimal"
+    assert response.json["status"] == expected_response.get("status", {})
+    assert numpy.isclose(response.json["objective_value"],
+                         expected_response.get("objective_value", {}),
+                         rtol=1e-05, atol=1e-08, equal_nan=False)
