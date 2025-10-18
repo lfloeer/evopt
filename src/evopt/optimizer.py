@@ -14,6 +14,13 @@ class OptimizationStrategy:
 
 
 @dataclass
+class GridConfig:
+    p_max_imp: float
+    p_max_exp: float
+    prc_p_exc_imp: float
+
+
+@dataclass
 class BatteryConfig:
     charge_from_grid: bool
     discharge_to_grid: bool
@@ -43,15 +50,16 @@ class Optimizer:
     solve() function to run optimization and return the results
     """
 
-    def __init__(self, strategy: OptimizationStrategy, batteries: List[BatteryConfig], time_series: TimeSeriesData,
+    def __init__(self, strategy: OptimizationStrategy, grid: GridConfig, batteries: List[BatteryConfig], time_series: TimeSeriesData,
                  eta_c: float = 0.95, eta_d: float = 0.95, M: float = 1e6, optimizer_settings: OptimizerSettings | None = None):
         """
-        Constructor
+        Optimizer Constructor
         """
 
         self.settings = optimizer_settings or OptimizerSettings()
 
         self.strategy = strategy
+        self.grid = grid
         self.batteries = batteries
         self.time_series = time_series
         self.eta_c = eta_c
@@ -65,12 +73,28 @@ class Optimizer:
         self.problem = None
         # dictionary of optimizer variables
         self.variables = {}
-        # Compute scaling parameters
+
+        # Compute scaling for strategy control parameters
         self.min_import_price = np.min(self.time_series.p_N)
         self.max_import_price = np.max(self.time_series.p_N)
-        # make sure goal_penalty is always positive
-        self.goal_penalty_energy = np.min([self.max_import_price, 0.1e-3]) * 10e1
-        self.goal_penalty_power = np.min([self.max_import_price, 0.1e-3]) * np.max(self.time_series.dt) / 3600 * 10e1
+
+        # scaling for penalty parameters. Make sure goal_penalty is always positive
+        self.prc_e_goal_pen = np.min([self.max_import_price, 0.1e-3]) * 10e1
+        self.prc_p_goal_pen = np.min([self.max_import_price, 0.1e-3]) * np.max(self.time_series.dt) / 3600 * 10e1
+
+        # penalty for exceeding grid import limit. Result shall not become infeasible but report the violation
+        # with helpful information
+        self.prc_e_grid_imp_pen = np.min([self.max_import_price, 0.1e-3]) * 10e1
+        # penalty for exceeding the grid export limit. Result shall not become infeasible but report the 'lost'
+        # solar power
+        self.prc_e_grid_exp_pen = np.min([self.max_import_price, 0.1e-3]) * 10e1
+
+        # if there is a demand rate given in the input, the grid import limit will be interpreted as the
+        # threshold beyond wich the demand rate is to be applied. Compute a demand rate flag for use in the
+        # build constraint and build objective methods.
+        self.is_grid_demand_rate_active = False
+        if self.grid.p_max_imp is not None and self.grid.prc_p_exc_imp is not None:
+            self.is_grid_demand_rate_active = True
 
     def create_model(self):
         """
@@ -82,7 +106,8 @@ class Optimizer:
 
         self._setup_variables()
         self._setup_target_function()
-        self._add_constraints()
+        self._add_energy_balance_constraints()
+        self._add_battery_constraints()
 
     def _setup_variables(self):
         """
@@ -134,6 +159,25 @@ class Optimizer:
         self.variables['n'] = [pulp.LpVariable(f"n_{t}", lowBound=0) for t in self.time_steps]
         self.variables['e'] = [pulp.LpVariable(f"e_{t}", lowBound=0) for t in self.time_steps]
 
+        # penalty variables for exceeding grid power limits (W)
+        # for grid import
+        if self.grid.p_max_imp is not None:
+            self.variables['e_imp_lim_exc'] = [pulp.LpVariable(f"p_imp_pen_{t}", lowBound=0) for t in self.time_steps]
+            # binary variable to allow limit exceeding only if the regular import actually hits the limit
+            # this is required to avoid that limit exceeds are shifted to other time steps
+            self.variables['z_imp_lim'] = [pulp.LpVariable(f"z_imp_lim_{t}", cat='Binary') for t in self.time_steps]
+
+        # for grid export
+        if self.grid.p_max_exp is not None:
+            self.variables['e_exp_lim_exc'] = [pulp.LpVariable(f"e_exp_lim_exc_{t}", lowBound=0) for t in self.time_steps]
+            # binary variable to allow limit exceeding only if the regular export actually hits the limit
+            self.variables['z_exp_lim'] = [pulp.LpVariable(f"z_exp_lim_{t}", cat='Binary') for t in self.time_steps]
+
+        # for demand rate calculation, we need to track the actual maximum import power
+        # within the time horizon (W)
+        if self.is_grid_demand_rate_active:
+            self.variables['p_max_imp_exc'] = pulp.LpVariable("p_max_imp_exc", lowBound=0)
+
         # Binary variable: power flow direction to / from grid variables
         # these variables
         # 1. avoid direct export from import if export remuneration is greater than import cost
@@ -169,9 +213,25 @@ class Optimizer:
         # Objective function (1): Maximize economic benefit
         objective = 0
 
+        ############################################################################
+        # actual cost & benefit elements
+
         # Grid import cost (negative because we want to minimize cost) [currency unit]
         for t in self.time_steps:
-            objective -= self.variables['n'][t] * self.time_series.p_N[t]
+            # if a demand rate beyond p_max_imp is applied, both portions have to be considered
+            # for energy cost. If only an import limit is given, there should never be power
+            # import beyond p_max_imp, however, if the limit gets violated, we account for
+            # the energy cost as well to stay consistent.
+            if self.grid.p_max_imp is not None:
+                objective -= (
+                    # grid import up to the demand rate threshold
+                    self.variables['n'][t]
+                    # import beyond the threshold
+                    + self.variables['e_imp_lim_exc'][t]
+                ) * self.time_series.p_N[t]
+            else:
+                # standard case
+                objective -= self.variables['n'][t] * self.time_series.p_N[t]
 
         # Grid export revenue [currency unit]
         for t in self.time_steps:
@@ -181,6 +241,12 @@ class Optimizer:
         for i, bat in enumerate(self.batteries):
             objective += self.variables['s'][i][-1] * bat.p_a
 
+        # charge for import power demand rate. The demand rate is applied to the maximum
+        # power draw beyond the threshold within the time horizon.
+        if self.is_grid_demand_rate_active:
+            objective += - self.grid.prc_p_exc_imp * self.variables['p_max_imp_exc']
+
+        ############################################################################
         # Penalties for goals that cannot be met
         for i, bat in enumerate(self.batteries):
             # unmet battery charging goals
@@ -188,15 +254,30 @@ class Optimizer:
                 for t in self.time_steps:
                     if self.batteries[i].s_goal[t] > 0:
                         # negative target function contribution in a maximizing optimization
-                        objective += - self.goal_penalty_energy * self.variables['s_goal_pen'][i][t]
+                        objective += - self.prc_e_goal_pen * self.variables['s_goal_pen'][i][t]
             # unmet charging demand due to battery reaching maximum SOC
             if bat.p_demand is not None:
                 for t in self.time_steps:
-                    objective += - self.goal_penalty_power \
+                    objective += - self.prc_p_goal_pen \
                         * self.variables['p_demand_pen'][i][t] \
-                        * (1 + (self.T - t) / self.T)
+                        * (1 + (self.T - t)/self.T)
 
+        # penalties for grid power limits that cannot be met.
+        for t in self.time_steps:
+
+            # penalty for exceeding the given import limit
+            if self.grid.p_max_imp is not None and not self.is_grid_demand_rate_active:
+                # negative target function contribution in a maximizing optimization
+                objective += - self.prc_e_grid_imp_pen * self.variables['e_imp_lim_exc'][t]
+
+            # penalty for exceeding the grid export limit
+            if self.grid.p_max_exp is not None:
+                # negative target function contribution in a maximizing optimization
+                objective += - self.prc_e_grid_exp_pen * self.variables['e_exp_lim_exc'][t]
+
+        #############################################################################
         # Secondary strategies to implement preferences without impact to actual cost
+
         # prefer charging first, then grid export
         if self.strategy.charging_strategy == 'charge_before_export':
             for i, bat in enumerate(self.batteries):
@@ -217,25 +298,96 @@ class Optimizer:
 
         self.problem += objective
 
-    def _add_constraints(self):
+    def _add_energy_balance_constraints(self):
         """
-        Add all constraints to the model
+        Add constraints related to the energy balance to the model.
         """
 
         self.time_steps = range(self.T)
 
-        # Constraint (2): Power balance
+        # Constraint (2): Power balance for each time step:
+        # - solar yield
+        # - household consumption
+        # - net charge and discharge of each battery
+        # - grid import
+        # - grid export
         for t in self.time_steps:
+            # battery charge + discharge balance
             battery_net_discharge = 0
             for i, bat in enumerate(self.batteries):
                 battery_net_discharge += (- self.variables['c'][i][t]
                                           + self.variables['d'][i][t])
 
+            # grid import: if there is an import power limit, the power exceeding the limit
+            # is going to the penalty variable. If a demand rate is active, it is applied
+            # to power drawn beyond the p_max_imp threshold.
+            e_grid_imp = self.variables['n'][t]
+            if self.grid.p_max_imp is not None:
+                if self.is_grid_demand_rate_active:
+                    # demand rate calculation
+                    e_grid_imp = self.variables['n'][t]+self.variables['e_imp_lim_exc'][t]
+                else:
+                    # grid import power limit
+                    e_grid_imp = self.variables['n'][t]+self.variables['e_imp_lim_exc'][t]
+
+            # grid export: if there is a limit, the power exceeding the limit
+            # is going to the penalty variable
+            e_grid_exp = self.variables['e'][t]
+            if self.grid.p_max_exp is not None:
+                e_grid_exp = self.variables['e'][t]+self.variables['e_exp_lim_exc'][t]
+
             self.problem += (battery_net_discharge
                              + self.time_series.ft[t]
-                             + self.variables['n'][t]
-                             == self.variables['e'][t]
+                             + e_grid_imp
+                             == e_grid_exp
                              + self.time_series.gt[t])
+
+        # Constraints (4)-(5): Grid flow direction
+        for t in self.time_steps:
+            # Export constraint
+            self.problem += self.variables['e'][t] <= self.M * self.variables['y'][t]
+            # Import constraint
+            self.problem += self.variables['n'][t] <= self.M * (1 - self.variables['y'][t])
+
+        # limit regular grid import power
+        if self.grid.p_max_imp is not None:
+            if self.is_grid_demand_rate_active:
+                # limit the demand rate free portion of the power
+                for t in self.time_steps:
+                    self.problem += self.variables['n'][t] <= self.grid.p_max_imp * self.time_series.dt[t] / 3600
+                    self.problem += (self.grid.p_max_imp * self.time_series.dt[t] / 3600 - self.variables['n'][t]
+                                     <= self.M * self.variables['z_imp_lim'][t])
+                    self.problem += (self.variables['e_imp_lim_exc'][t]
+                                     <= self.M * (1 - self.variables['z_imp_lim'][t]))
+            else:
+                # limit the actual import power
+                for t in self.time_steps:
+                    self.problem += self.variables['n'][t] <= self.grid.p_max_imp * self.time_series.dt[t] / 3600
+                    self.problem += (self.grid.p_max_imp * self.time_series.dt[t] / 3600 - self.variables['n'][t]
+                                     <= self.M * self.variables['z_imp_lim'][t])
+                    self.problem += (self.variables['e_imp_lim_exc'][t]
+                                     <= self.M * (1 - self.variables['z_imp_lim'][t]))
+
+        # limit regular grid export power
+        if self.grid.p_max_exp is not None:
+            for t in self.time_steps:
+                self.problem += self.variables['e'][t] <= self.grid.p_max_exp * self.time_series.dt[t] / 3600
+                self.problem += (self.grid.p_max_exp * self.time_series.dt[t] / 3600 - self.variables['e'][t]
+                                 <= self.M * self.variables['z_exp_lim'][t])
+                self.problem += (self.variables['e_exp_lim_exc'][t]
+                                 <= self.M * (1 - self.variables['z_exp_lim'][t]))
+
+        # if demand rate is applied, the maximum grid import power value
+        # of all time steps drives the demand rate charge
+        if self.is_grid_demand_rate_active:
+            for t in self.time_steps:
+                self.problem += self.variables['e_imp_lim_exc'][t] \
+                    <= self.variables['p_max_imp_exc'] * self.time_series.dt[t] / 3600
+
+    def _add_battery_constraints(self):
+        """
+        Add constraints related to battery behavior to the model.
+        """
 
         # Constraint (3): Battery dynamics
         for i, bat in enumerate(self.batteries):
@@ -302,13 +454,6 @@ class Optimizer:
                 # Charge constraint
                 self.problem += self.variables['c'][i][t] <= self.M * (1 - self.variables['z_cd'][i][t])
 
-        # Constraints (4)-(5): Grid flow direction
-        for t in self.time_steps:
-            # Export constraint
-            self.problem += self.variables['e'][t] <= self.M * self.variables['y'][t]
-            # Import constraint
-            self.problem += self.variables['n'][t] <= self.M * (1 - self.variables['y'][t])
-
     def solve(self) -> Dict:
         """
         Creates the MILP model if none exists and solves the optimization problem.
@@ -329,14 +474,44 @@ class Optimizer:
         # Extract results
         status = pulp.LpStatus[self.problem.status]
 
+        # grid import and export if no demand rate is active
+        # if a limit is set and exceeded, this is the part that is actually imported / exported.
+        # the exceeding portion is captured in 'e_imp_lim_exc' and / or 'e_exp_lim_exc'
+        e_grid_import = [pulp.value(var) for var in self.variables['n']]
+        e_grid_export = [pulp.value(var) for var in self.variables['e']]
+        # if a demand rate is active, the actual import power is both parts, 'n' and 'e_imp_lim_exc'
+        if self.is_grid_demand_rate_active:
+            for t in self.time_steps:
+                e_grid_import[t] += pulp.value(self.variables['e_imp_lim_exc'][t])
+
+        # get limit violations
+        # grid import limit
+        grid_imp_limit_violated = False
+        e_grid_imp_overshoot = []
+        if self.grid.p_max_imp is not None and not self.is_grid_demand_rate_active:
+            grid_imp_limit_violated = (np.max([pulp.value(var) for var in self.variables['e_imp_lim_exc']]) > 0)
+            e_grid_imp_overshoot = [pulp.value(var) for var in self.variables['e_imp_lim_exc']]
+        # grid export limit
+        grid_exp_limit_hit = False
+        e_grid_exp_overshoot = []
+        if self.grid.p_max_exp is not None:
+            grid_exp_limit_hit = (np.max([pulp.value(var) for var in self.variables['e_exp_lim_exc']]) > 0)
+            e_grid_exp_overshoot = [pulp.value(var) for var in self.variables['e_exp_lim_exc']]
+
         if status == 'Optimal':
             result = {
                 'status': status,
-                'objective_value': pulp.value(self.problem.objective),
+                'objective_value': self.get_clean_objective_value(),
+                'limit_violations': {
+                    'grid_import_limit_exceeded': grid_imp_limit_violated,
+                    'grid_export_limit_hit': grid_exp_limit_hit
+                },
                 'batteries': [],
-                'grid_import': [pulp.value(var) for var in self.variables['n']],
-                'grid_export': [pulp.value(var) for var in self.variables['e']],
-                'flow_direction': []
+                'grid_import': e_grid_import,
+                'grid_export': e_grid_export,
+                'flow_direction': [],
+                'grid_import_overshoot': e_grid_imp_overshoot,
+                'grid_export_overshoot': e_grid_exp_overshoot
             }
 
             # Extract battery results
@@ -360,8 +535,50 @@ class Optimizer:
             return {
                 'status': status,
                 'objective_value': None,
+                'limit_violations': {
+                    'grid_import_limit_exceeded': False,
+                    'grid_export_limit_hit': False
+                },
                 'batteries': [],
                 'grid_import': [],
                 'grid_export': [],
-                'flow_direction': []
+                'flow_direction': [],
+                'grid_import_overshoot': [],
+                'grid_export_overshoot': []
             }
+
+    def get_clean_objective_value(self):
+        '''
+        recalculate the objective value without penalties and strategy icentives
+        '''
+        clean_objective = 0
+        # Grid import cost (negative because we want to minimize cost) [currency unit]
+        for t in self.time_steps:
+            if self.grid.p_max_imp is not None:
+                clean_objective -= (
+                    # grid import up to the demand rate threshold
+                    pulp.value(self.variables['n'][t])
+                    # import beyond the threshold
+                    + pulp.value(self.variables['e_imp_lim_exc'][t])
+                ) * self.time_series.p_N[t]
+            else:
+                # standard case
+                clean_objective -= pulp.value(self.variables['n'][t]) * self.time_series.p_N[t]
+
+        # Grid export revenue [currency unit]
+        for t in self.time_steps:
+            clean_objective += pulp.value(self.variables['e'][t]) * self.time_series.p_E[t]
+
+        # Final state of charge value [currency unit]
+        for i, bat in enumerate(self.batteries):
+            clean_objective += (pulp.value(self.variables['s'][i][self.T-1])
+                                - pulp.value(self.variables['s'][i][0])) * bat.p_a
+
+        # charge for import power demand rate. The demand rate is applied to the maximum
+        # power draw beyond the threshold within the time horizon.
+        if self.is_grid_demand_rate_active:
+            clean_objective += - self.grid.prc_p_exc_imp \
+                * pulp.value(self.variables['p_max_imp_exc'])
+        print(clean_objective)
+
+        return clean_objective
