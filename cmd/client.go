@@ -118,6 +118,7 @@ func main() {
 	}
 
 	res := *resp.JSON200
+
 	if *vFlag {
 		b, _ := json.MarshalIndent(res, "", "  ")
 		fmt.Println(string(b))
